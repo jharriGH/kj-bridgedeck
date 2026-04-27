@@ -130,6 +130,22 @@ if the parent domain is on Cloudflare.
 
 ---
 
+## 4a-cost. Apply the cost-intel migration (REQUIRED for cost guardrails)
+
+The empire-grade cost intelligence sprint added `kjcodedeck.cost_log` and
+`kjcodedeck.cost_caps`. Without these tables, the API returns zero/empty
+for every `/cost/*` endpoint and the per-turn / empire-daily caps don't
+fire (they soft-fail to no-op). Apply once:
+
+```sql
+\i supabase/migrations/20260427_cost_intel.sql
+-- or paste the file contents into Supabase SQL Editor
+```
+
+This seeds three default caps (empire_daily=$10/warn,
+empire_weekly=$50/haiku_force, bridge_per_turn=$0.50/hard_stop). Edit
+them from the Cost admin tab once the UI redeploys.
+
 ## 4a. Apply the brain_extras migration (optional but recommended)
 
 `POST /projects/sync` syncs Brain projects into Supabase. Brain returns
