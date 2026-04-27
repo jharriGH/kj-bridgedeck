@@ -106,7 +106,11 @@ async def sync_from_brain() -> dict:
     The first entry {"id":"all"} is a UI placeholder — skipped here.
 
     Field mapping: id→slug, label→display_name, desc→description.
-    emoji/color/group/status/next_action passed through as-is."""
+    emoji + color land in their dedicated columns. group/status/next_action
+    go into the optional `brain_extras` JSONB column added by
+    `supabase/migrations/20260427_brain_extras.sql`. If that column doesn't
+    exist yet, sync transparently retries without it — basic fields still
+    land, just without the extras blob."""
     try:
         resp = await BrainClient().projects()
     except Exception as e:
@@ -115,6 +119,7 @@ async def sync_from_brain() -> dict:
     brain_projects = resp.get("projects", []) if isinstance(resp, dict) else (resp or [])
     now = datetime.now(timezone.utc).isoformat()
     synced = 0
+    skipped: list[dict] = []
     synced_slugs: list[str] = []
 
     for bp in brain_projects:
@@ -123,37 +128,59 @@ async def sync_from_brain() -> dict:
         slug = bp.get("id")
         if not slug:
             continue
-        existing = await fetch_one("projects", slug=slug)
+
+        extras = {
+            k: bp[k] for k in ("group", "status", "next_action") if bp.get(k) is not None
+        }
+
         payload = {
             "slug": slug,
             "display_name": bp.get("label") or slug,
             "emoji": bp.get("emoji"),
             "color": bp.get("color") or "#00E5FF",
             "description": bp.get("desc"),
-            "group": bp.get("group"),
-            "status": bp.get("status"),
-            "next_action": bp.get("next_action"),
             "last_synced_from_brain": now,
         }
-        # Drop None values so we don't overwrite existing fields with NULLs.
+        if extras:
+            payload["brain_extras"] = extras
         payload = {k: v for k, v in payload.items() if v is not None}
-        # `slug` is the PK; always present.
         payload["slug"] = slug
-        if existing:
-            await sb_update("projects", payload, slug=slug)
-        else:
-            await insert("projects", payload)
-        synced += 1
-        synced_slugs.append(slug)
+
+        try:
+            await _upsert_with_extras_fallback(slug, payload)
+            synced += 1
+            synced_slugs.append(slug)
+        except Exception as e:  # pragma: no cover — surface and continue
+            skipped.append({"slug": slug, "error": str(e)[:200]})
 
     await history_logger.log(
         event_type="project.synced_from_brain",
         event_category="action",
         actor="api",
         action="sync_projects",
-        details={"synced": synced, "projects": synced_slugs},
+        details={"synced": synced, "projects": synced_slugs, "skipped": skipped},
     )
-    return {"synced": synced, "projects": synced_slugs}
+    return {"synced": synced, "projects": synced_slugs, "skipped": skipped}
+
+
+async def _upsert_with_extras_fallback(slug: str, payload: dict) -> None:
+    """Upsert a row; if Postgres rejects `brain_extras` (column missing in
+    schema), drop it and retry once."""
+    existing = await fetch_one("projects", slug=slug)
+    try:
+        if existing:
+            await sb_update("projects", payload, slug=slug)
+        else:
+            await insert("projects", payload)
+    except Exception as e:
+        msg = str(e).lower()
+        if "brain_extras" not in payload or "brain_extras" not in msg:
+            raise
+        retry = {k: v for k, v in payload.items() if k != "brain_extras"}
+        if existing:
+            await sb_update("projects", retry, slug=slug)
+        else:
+            await insert("projects", retry)
 
 
 @router.post("")
