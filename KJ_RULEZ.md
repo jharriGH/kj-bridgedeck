@@ -10,46 +10,48 @@
 ## BRAIN ENDPOINT VERIFICATION RULE
 
 Before any KJE product calls a new Brain endpoint, the build prompt MUST
-include a smoke-test step. **No exceptions, no assumptions, no "probably
-works".**
+include a smoke-test step.
 
-### The mandatory smoke-test sequence
+The smoke-test step MUST include all of these:
 
-Every build/agent that integrates with Brain runs these BEFORE writing
-client code:
+1. **Hit `/health` first** to confirm Brain is reachable + version is current:
 
-```bash
-# 1. Confirm Brain is reachable and capture the version.
-curl -sS https://jim-brain-production.up.railway.app/health
-# expect: {"status":"ok","service":"Jim Brain API","version":"1.x.x", ...}
+   ```bash
+   curl -s https://jim-brain-production.up.railway.app/health
+   ```
 
-# 2. Confirm the EXACT endpoint you're about to call returns 200.
-curl -sS -H "x-brain-key: jim-brain-kje-2026-kingjames" \
-     https://jim-brain-production.up.railway.app/<endpoint>
+2. **Hit the exact endpoint you intend to call**, with the lowercase auth
+   header:
 
-# 3. Log the actual response shape (top-level keys, sample row) into the
-#    session notes / handoff. This is what other agents read to know what
-#    to map.
-```
+   ```bash
+   curl -s https://jim-brain-production.up.railway.app/[endpoint] \
+     -H "x-brain-key: jim-brain-kje-2026-kingjames"
+   ```
 
-If any step fails or returns an unexpected shape, **STOP and surface the
-discrepancy to the user before writing client code that assumes the
-endpoint works.**
+   IMPORTANT: header is `x-brain-key` (lowercase), NOT `Authorization: Bearer`
+   or `X-API-Key`. This was burned in 2026-04-27 BridgeDeck debugging.
 
-### What counts as "verifying"
+3. **Capture the actual JSON response shape** and document it in the build
+   prompt:
 
-- ✅ Curling the live Brain and inspecting the JSON response.
-- ✅ Reading source for the deployed Brain build at the exact tag in
-  production.
-- ❌ "It's in the spec doc."
-- ❌ "It worked in another repo last month."
-- ❌ "The handoff template says it exists."
+   - Top-level keys
+   - Whether arrays are wrapped (e.g. `{"projects":[...], "count":N}`) or naked
+   - Field name mappings to local schema (e.g. `brain.id → local.slug`)
+   - Pseudo-projects to filter (e.g. `{"id":"all"}` is a UI placeholder)
 
-### Auth header
+4. **WHAT COUNTS AS VERIFYING:**
 
-Brain v1.3.x and later require **`x-brain-key`** (lowercase). The legacy
-`X-API-Key` and `Authorization: Bearer` headers are silently ignored.
-Verified live 2026-04-27 against `jim-brain-production.up.railway.app`.
+   - Real curl output showing HTTP 200 + JSON body
+   - Documented field mapping table
+   - Explicit handling of pseudo/special rows
+
+5. **WHAT DOES NOT COUNT:**
+
+   - "It probably looks like..."
+   - Assuming endpoint paths from convention (e.g. `/codedeck/X` when `/X` is
+     real)
+   - Reusing endpoints from prior product memory without re-verifying — Brain
+     versions evolve
 
 ### Endpoint catalog (verified live 2026-04-27)
 
@@ -57,22 +59,12 @@ See `CLAUDE.md` in `kj-bridgedeck` for the full GET/POST/PATCH/DELETE
 catalog. Until a project moves it elsewhere, treat that catalog as the
 empire-wide canonical list and update it when Brain changes.
 
-### Field-mapping discipline
-
-Brain has its own field names; KJE products have their own. Map at the
-boundary, never in the middle of business logic. Document the mapping in
-`CLAUDE.md` next to the endpoint that uses it (see the
-"Brain field mapping for projects" example).
-
-### Skip pseudo-projects
-
-`GET /projects` returns a `{"id":"all"}` placeholder for UI dropdowns.
-Always filter it out before persisting to local Postgres / Supabase.
-
 ---
 
 ## REVISION LOG
 
-- 2026-04-27 — initial rule introduced after a sync against
-  `/codedeck/projects` 404'd because the endpoint was assumed, not
-  verified. Real path is `/projects` with `{"projects":[...], "count":N}`.
+- **2026-04-27**: Rule introduced after BridgeDeck Bridge-C burned ~2 hours
+  debugging `/codedeck/projects` (didn't exist) + `Authorization: Bearer`
+  (wrong header). Real endpoint was `/projects` with `x-brain-key` header.
+  Both were guessable from convention but neither was verified against live
+  Brain.
