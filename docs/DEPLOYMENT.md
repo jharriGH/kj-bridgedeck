@@ -50,23 +50,51 @@ These run in parallel. Each will signal done in its own PowerShell session. Mark
 
 > After Bridge-C signals done.
 
-1. In Render dashboard → **New** → **Blueprint** → pick the `jharriGH/kj-bridgedeck` repo.
-2. Render detects `render.yaml` and creates the `kj-bridgedeck-api` web service.
-3. In the service's **Environment** tab, fill in the secrets marked `sync: false`:
-   - `SUPABASE_URL` (public URL from Supabase Settings → API)
-   - `SUPABASE_SERVICE_KEY` (from step 1.5)
+The API has **two deployment modes**:
+
+- **Cloud mode** (Render): Handles dashboard reads, settings, history, projects, notes, handoffs, bridge chat. Cannot proxy to the local watcher — `/sessions/{id}/message|approve|reject|stop|focus` and `/sessions/launch` return 503 with `{"error": "watcher_unreachable"}`.
+- **Local mode** (Jim's machine): Same code, run with `WATCHER_HOST=http://localhost:7171` so it can proxy session control. Started with `cd api && uvicorn main:app --host 0.0.0.0 --port 8080 --env-file ../.env`.
+
+For now, deploy cloud mode. Session 2+ will add a local companion API on Jim's machine that proxies session control to the watcher.
+
+### Cloud deploy steps
+
+1. Push repo to GitHub (Bridge-A already did this).
+2. In Render dashboard → **New** → **Blueprint** → pick `jharriGH/kj-bridgedeck`.
+3. Render detects `render.yaml` and creates the `kj-bridgedeck-api` web service:
+   - Region: Oregon
+   - Plan: Starter ($7/mo)
+   - Branch: `main`
+   - Build: `pip install -r api/requirements.txt`
+   - Start: `cd api && uvicorn main:app --host 0.0.0.0 --port $PORT`
+4. In the service's **Environment** tab, fill in the secrets marked `sync: false`:
+   - `SUPABASE_URL` = `https://dhzpwobfihrprlcxqjbq.supabase.co`
+   - `SUPABASE_SERVICE_KEY` (from Supabase Settings → API → service_role)
    - `SUPABASE_ANON_KEY`
-   - `BRAIN_KEY` (`jim-brain-kje-2026-kingjames`)
-   - `BRIDGEDECK_ADMIN_KEY` (`bridgedeck-kj-2026-kingjames` or rotate to a fresh UUID)
+   - `BRAIN_API_URL` = `https://jim-brain-production.up.railway.app`
+   - `BRAIN_KEY` = `jim-brain-kje-2026-kingjames`
+   - `BRIDGEDECK_ADMIN_KEY` = `bridgedeck-kj-2026-kingjames`
    - `ANTHROPIC_API_KEY`
-   - `OPENAI_API_KEY`
-4. Wait for the first deploy to finish. Tail logs until you see `Uvicorn running on 0.0.0.0:$PORT`.
-5. Smoke-test:
+   - `OPENAI_API_KEY` (Bridge-D needs this for Whisper)
+   - `CORS_ORIGINS` = `https://bridge.kjempire.com,https://bridgedeck.pages.dev,http://localhost:3000,http://localhost:5173`
+   - Leave `WATCHER_HOST` unset (or set to a placeholder) so cloud mode returns the right 503 message instead of timing out.
+5. Wait for the first deploy to finish (3–5 min). Tail logs until you see `Uvicorn running on 0.0.0.0:$PORT`.
+6. Smoke-test:
    ```bash
    curl https://kj-bridgedeck-api.onrender.com/health
-   # expect: {"healthy": true, "version": "...", "supabase": "ok", "brain": "ok"}
+   # expect: {"healthy": true, "version": "0.1.0", "supabase": "ok", "brain": "ok", "watcher": "not_configured", ...}
    ```
-6. Note the public URL — this becomes `API_PUBLIC_URL` in the UI build.
+7. Visit `/docs` for the Swagger UI — every route is enumerated; `/bridge/*` returns 501 until Bridge-D ships.
+8. Note the public URL — this becomes `API_PUBLIC_URL` in the UI build.
+
+### Auth
+
+Every route except `/health`, `/`, and the docs requires `Authorization: Bearer $BRIDGEDECK_ADMIN_KEY`. Example:
+
+```bash
+curl -H "Authorization: Bearer $BRIDGEDECK_ADMIN_KEY" \
+  https://kj-bridgedeck-api.onrender.com/projects
+```
 
 ---
 

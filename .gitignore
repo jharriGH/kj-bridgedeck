@@ -27,6 +27,9 @@ dist/
 *.spec
 *.exe
 
+# Keep our hand-tuned PyInstaller spec.
+!watcher/watcher.spec
+
 # Node
 node_modules/
 npm-debug.log*
@@ -35,6 +38,10 @@ yarn-error.log*
 dist/
 .vite/
 .parcel-cache/
+
+# Bridge-E publishes static files from bridge-ui/dist/ — keep tracked.
+!bridge-ui/dist/
+!bridge-ui/dist/**
 
 # OS
 .DS_Store

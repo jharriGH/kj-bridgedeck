@@ -1,0 +1,11 @@
+{
+  "name": "kj-bridgedeck-ui",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KJ BridgeDeck — voice-first empire command UI (static, no bundler).",
+  "scripts": {
+    "dev": "npx --yes serve -l 3000 dist",
+    "build": "node ./scripts/build.mjs",
+    "deploy": "npx --yes wrangler@4 pages deploy dist --project-name=kj-bridgedeck-ui --branch=main"
+  }
+}

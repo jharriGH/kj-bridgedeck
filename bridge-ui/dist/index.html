@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KJ BridgeDeck</title>
+  <link rel="stylesheet" href="/css/app.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2300E5FF'/%3E%3Ctext x='50%25' y='58%25' font-size='40' text-anchor='middle' fill='%23000' font-family='monospace' font-weight='bold'%3EKJ%3C/text%3E%3C/svg%3E" />
+</head>
+<body data-theme="hud">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-logo">KJ</span>
+      <span class="brand-name">BridgeDeck</span>
+      <span class="brand-version" id="version-tag">v1.0.0</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab" data-tab="monitor" role="tab" aria-selected="true">Monitor</button>
+      <button class="tab" data-tab="terminal" role="tab" aria-selected="false">Terminal</button>
+      <button class="tab" data-tab="bridge" role="tab" aria-selected="false">Bridge</button>
+    </nav>
+    <div class="topbar-right">
+      <span class="health-pill" id="health-pill" title="Click for details">
+        <span class="health-dot" data-status="unknown"></span>
+        <span id="health-label">checking…</span>
+      </span>
+      <button class="icon-btn" id="open-history" title="History">▤</button>
+      <button class="icon-btn" id="open-admin" title="Admin">⚙</button>
+    </div>
+  </header>
+
+  <main class="content">
+    <!-- MONITOR TAB ------------------------------------------------------- -->
+    <section class="tab-panel" id="panel-monitor" data-active="true">
+      <div class="panel-toolbar">
+        <h2>Live Sessions</h2>
+        <div class="toolbar-actions">
+          <span class="muted" id="monitor-meta">—</span>
+          <button class="btn ghost" id="refresh-monitor">↻ Refresh</button>
+          <button class="btn primary" id="launch-session-btn">＋ Launch</button>
+        </div>
+      </div>
+      <div class="grid" id="session-grid">
+        <div class="placeholder" id="monitor-placeholder">
+          <p>Connecting to API…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TERMINAL TAB ------------------------------------------------------ -->
+    <section class="tab-panel" id="panel-terminal" data-active="false">
+      <div class="terminal-empty" id="terminal-empty">
+        <p>Click a session tile in <strong>Monitor</strong> to open it here.</p>
+      </div>
+      <div class="terminal-body hidden" id="terminal-body">
+        <header class="terminal-header">
+          <div>
+            <span class="emoji" id="term-emoji">•</span>
+            <strong id="term-project">—</strong>
+            <span class="status-chip" id="term-status">idle</span>
+          </div>
+          <div class="terminal-stats">
+            <span><span class="muted">tok in</span> <b id="term-tokens-in">0</b></span>
+            <span><span class="muted">tok out</span> <b id="term-tokens-out">0</b></span>
+            <span><span class="muted">$</span> <b id="term-cost">0.0000</b></span>
+            <span><span class="muted">model</span> <b id="term-model">—</b></span>
+          </div>
+          <div class="terminal-actions">
+            <button class="btn ghost" id="term-focus">Focus window</button>
+            <button class="btn ghost" id="term-stop">Stop</button>
+          </div>
+        </header>
+        <div class="terminal-needs-input hidden" id="needs-input-card">
+          <div class="needs-input-prompt" id="needs-input-text"></div>
+          <div class="needs-input-actions">
+            <button class="btn primary" data-approve="1">1 — Yes</button>
+            <button class="btn warn" data-approve="2">2 — No</button>
+            <button class="btn ghost" data-approve="3">3 — Other</button>
+          </div>
+        </div>
+        <div class="terminal-transcript" id="term-transcript"></div>
+        <footer class="terminal-input">
+          <textarea id="term-input" placeholder="Type a message and press Enter…" rows="2"></textarea>
+          <button class="btn primary" id="term-send">Send</button>
+          <button class="btn ghost" id="term-note">Note</button>
+        </footer>
+      </div>
+    </section>
+
+    <!-- BRIDGE TAB -------------------------------------------------------- -->
+    <section class="tab-panel" id="panel-bridge" data-active="false">
+      <div class="bridge-shell">
+        <div class="bridge-history" id="bridge-history">
+          <div class="bridge-greeting">
+            <h2>Bridge</h2>
+            <p>Hold <kbd>Space</kbd> to talk, or type below. Voice answers when Piper is configured.</p>
+          </div>
+        </div>
+        <div class="bridge-suggested">
+          <button class="chip" data-suggest="status">status</button>
+          <button class="chip" data-suggest="what should I work on next?">next action</button>
+          <button class="chip" data-suggest="empire summary">empire summary</button>
+          <button class="chip" data-suggest="cost today">cost today</button>
+        </div>
+        <footer class="bridge-input">
+          <button class="btn voice" id="voice-btn" title="Hold to talk (Space)" aria-pressed="false">
+            <span class="voice-dot"></span>
+            <span id="voice-label">Talk</span>
+          </button>
+          <textarea id="bridge-input" placeholder="Ask the empire…" rows="2"></textarea>
+          <button class="btn primary" id="bridge-send">Send</button>
+        </footer>
+        <div class="bridge-meta" id="bridge-meta"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ADMIN MODAL --------------------------------------------------------- -->
+  <div class="modal" id="admin-modal" aria-hidden="true">
+    <div class="modal-card wide">
+      <header>
+        <h2>Admin</h2>
+        <button class="icon-btn" data-close="admin-modal">✕</button>
+      </header>
+      <div class="modal-body">
+        <aside class="admin-nav">
+          <button class="admin-nav-item active" data-admin-panel="connection">Connection</button>
+          <button class="admin-nav-item" data-admin-panel="settings">Settings</button>
+          <button class="admin-nav-item" data-admin-panel="projects">Projects</button>
+          <button class="admin-nav-item" data-admin-panel="auto-approve">Auto-approve</button>
+          <button class="admin-nav-item" data-admin-panel="actions">Action queue</button>
+          <button class="admin-nav-item" data-admin-panel="handoffs">Handoffs</button>
+          <button class="admin-nav-item" data-admin-panel="stats">Stats</button>
+        </aside>
+        <section class="admin-panel" id="admin-panel-body">
+          <p class="muted">Pick a panel.</p>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- HISTORY MODAL ------------------------------------------------------- -->
+  <div class="modal" id="history-modal" aria-hidden="true">
+    <div class="modal-card wide">
+      <header>
+        <h2>History</h2>
+        <div class="history-filters">
+          <input id="history-q" placeholder="search…" />
+          <select id="history-category">
+            <option value="">all categories</option>
+          </select>
+          <button class="btn ghost" id="history-refresh">↻</button>
+          <button class="icon-btn" data-close="history-modal">✕</button>
+        </div>
+      </header>
+      <div class="modal-body">
+        <div class="history-list" id="history-list"><p class="muted">Loading…</p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LAUNCH MODAL -------------------------------------------------------- -->
+  <div class="modal" id="launch-modal" aria-hidden="true">
+    <div class="modal-card">
+      <header>
+        <h2>Launch session</h2>
+        <button class="icon-btn" data-close="launch-modal">✕</button>
+      </header>
+      <div class="modal-body launch-body">
+        <label>Project<select id="launch-project"></select></label>
+        <label>Initial prompt<textarea id="launch-prompt" rows="4" placeholder="Optional initial prompt…"></textarea></label>
+        <label>Working directory<input id="launch-cwd" placeholder="(optional override)" /></label>
+        <button class="btn primary" id="launch-confirm">Launch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADMIN-KEY GATE ------------------------------------------------------ -->
+  <div class="modal" id="key-gate" aria-hidden="false">
+    <div class="modal-card narrow">
+      <header><h2>Admin Key</h2></header>
+      <div class="modal-body">
+        <p class="muted">Stored locally only. Sent as <code>Authorization: Bearer …</code>.</p>
+        <input id="admin-key-input" type="password" placeholder="bridgedeck-…-kingjames" autocomplete="off" />
+        <p class="muted small">API URL: <code id="key-gate-api">—</code></p>
+        <button class="btn primary" id="admin-key-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    window.BRIDGEDECK_CONFIG = window.BRIDGEDECK_CONFIG || {
+      API_URL: "https://kj-bridgedeck-api.onrender.com",
+      VERSION: "1.0.0"
+    };
+  </script>
+  <script src="/js/config.js"></script>
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
