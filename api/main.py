@@ -159,15 +159,22 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Middleware order matters. Starlette processes middleware OUTERMOST FIRST,
+# and `add_middleware` PREPENDS to that chain — i.e. the LAST .add_middleware
+# call wraps the OUTERMOST. So to make CORS the outermost (so it can answer
+# OPTIONS preflights and attach Access-Control-Allow-Origin to ANY response,
+# including 401s from auth), it must be added LAST.
+app.add_middleware(AdminAuthMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
+    allow_origins=["*"],
+    allow_credentials=False,  # MUST be False with allow_origins=["*"] per CORS spec
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=True,
+    expose_headers=["*"],
+    max_age=3600,
 )
-app.add_middleware(RequestLoggingMiddleware)
-app.add_middleware(AdminAuthMiddleware)
 
 app.include_router(health.router, tags=["health"])
 app.include_router(sessions.router, prefix="/sessions", tags=["sessions"])

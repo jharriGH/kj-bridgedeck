@@ -14,9 +14,17 @@ OPEN_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/"}
 
 
 class AdminAuthMiddleware(BaseHTTPMiddleware):
-    """Require Authorization: Bearer {BRIDGEDECK_ADMIN_KEY} on every route except OPEN_PATHS."""
+    """Require Authorization: Bearer {BRIDGEDECK_ADMIN_KEY} on every route except OPEN_PATHS.
+
+    OPTIONS requests are always allowed through — browser preflights cannot
+    carry an Authorization header, so blocking them would make every CORS
+    fetch fail. CORSMiddleware (added later, outermost) actually answers the
+    preflight; this skip is belt-and-braces for any OPTIONS that slips past."""
 
     async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         path = request.url.path
         if path in OPEN_PATHS or path.startswith("/docs") or path.startswith("/openapi"):
             return await call_next(request)
