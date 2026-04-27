@@ -676,8 +676,11 @@ class BridgeChatService:
             .select("title").eq("id", str(conv_id)).limit(1).execute()
         )
         rows = getattr(existing, "data", None) or []
-        if rows and rows[0].get("title", "").startswith("[digest]"):
-            return rows[0]["title"][len("[digest]") :].strip()
+        # `.get(key, default)` returns None when the column exists but is NULL,
+        # so the `or ""` guards against `None.startswith` crashes.
+        existing_title = (rows[0].get("title") if rows else None) or ""
+        if existing_title.startswith("[digest]"):
+            return existing_title[len("[digest]") :].strip()
 
         cutoff = max(0, len(history) - MAX_HISTORY_TURNS * 2)
         older = history[:cutoff]
