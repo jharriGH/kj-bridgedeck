@@ -42,6 +42,20 @@ class VoiceService:
     async def transcribe(self, audio_base64: str, mime: str = "audio/webm") -> str:
         if not self.openai_key:
             raise RuntimeError("OPENAI_API_KEY is required for Whisper transcription.")
+        # Rate-limit guard. One Whisper call = one unit. Local import so
+        # `bridge_core.voice` stays usable in environments that mock out
+        # the whole rate_limiter module (e.g. test fixtures).
+        from .rate_limiter import whisper_requests_tracker
+        tracker = whisper_requests_tracker()
+        allowed, status, _ = tracker.can_consume(1)
+        if not allowed:
+            raise RuntimeError(
+                f"Whisper rate limit hit ({tracker.current_usage()}/"
+                f"{tracker.HARD_LIMIT} per {tracker.WINDOW_SECONDS}s). "
+                "Try again in a minute."
+            )
+        tracker.consume(1)
+
         audio_bytes = base64.b64decode(audio_base64)
         filename = "audio.webm" if mime.endswith("webm") else "audio.wav"
         async with httpx.AsyncClient(timeout=60) as client:

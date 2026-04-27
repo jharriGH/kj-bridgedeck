@@ -96,6 +96,7 @@ class BridgeChatRequest(BaseModel):
     force_model: Optional[str] = None
     max_tokens: Optional[int] = Field(default=None, ge=64, le=8192)
     confirm_low_context: bool = False
+    force_full_context: bool = False  # Skip token-budget trim/hard-truncate
 
 
 class ActionDirective(BaseModel):

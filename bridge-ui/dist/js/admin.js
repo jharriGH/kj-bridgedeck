@@ -245,6 +245,24 @@ async function renderCost(body) {
 
     <h3 style="margin-top:18px;">Caps</h3>
     <table class="admin-table"><thead><tr><th>Scope</th><th>Cap (USD)</th><th>Behavior</th><th>Enabled</th><th></th></tr></thead><tbody id="c-caps-body"></tbody></table>
+
+    <h3 style="margin-top:18px;">Cheap mode (panic switch)</h3>
+    <div class="cost-card">
+      <label><input type="checkbox" id="c-cheap"> <b>Cheap mode</b> — pin to Haiku, halve output cap, skip Piper</label>
+      <div style="margin-top:6px;"><label><input type="checkbox" id="c-caching"> Anthropic prompt caching</label></div>
+      <div style="margin-top:6px;"><label><input type="checkbox" id="c-retry"> Auto-retry on rate limit (queue ≤30s)</label></div>
+      <button class="btn primary" id="c-cheap-save" style="margin-top:8px;">Save toggles</button>
+    </div>
+
+    <h3 style="margin-top:18px;">By intent (last 30 days)</h3>
+    <table class="admin-table"><thead><tr><th>Intent</th><th>Turns</th><th>Avg $</th><th>Total $</th><th>Avg in</th><th>Avg out</th><th>Avg ms</th></tr></thead><tbody id="c-intent-body"></tbody></table>
+    <div id="c-intent-recs" style="margin-top:6px;font-size:12px;color:var(--warn);"></div>
+
+    <h3 style="margin-top:18px;">Sessions needing attention</h3>
+    <table class="admin-table"><thead><tr><th>Session</th><th>Project</th><th>Status</th><th>Cost</th><th>Calls</th><th>Artifacts</th></tr></thead><tbody id="c-sess-attn"></tbody></table>
+
+    <h3 style="margin-top:18px;">Rate-limit blocks (24h)</h3>
+    <table class="admin-table"><thead><tr><th>When</th><th>Provider</th><th>Requested</th><th>Usage</th><th>Limit</th><th>Resolution</th></tr></thead><tbody id="c-rate-body"></tbody></table>
   `;
 
   try {
@@ -328,6 +346,84 @@ async function renderCost(body) {
         }
       };
     });
+
+    // Bridge toggles + by-intent + sessions/health + rate-limit blocks.
+    try {
+      const settings = await api.get("/settings/bridge");
+      document.getElementById("c-cheap").checked   = settings.cheap_mode === true;
+      document.getElementById("c-caching").checked = settings.prompt_caching_enabled !== false;
+      document.getElementById("c-retry").checked   = settings.auto_retry_on_rate_limit !== false;
+    } catch {}
+
+    document.getElementById("c-cheap-save").onclick = async () => {
+      const updates = {
+        cheap_mode:               document.getElementById("c-cheap").checked,
+        prompt_caching_enabled:   document.getElementById("c-caching").checked,
+        auto_retry_on_rate_limit: document.getElementById("c-retry").checked,
+      };
+      let ok = 0;
+      for (const [k, v] of Object.entries(updates)) {
+        try {
+          await api.patch(`/settings/bridge/${k}`, { namespace: "bridge", key: k, value: v });
+          ok++;
+        } catch (e) {
+          toast.error(`${k}: ${e.message}`);
+        }
+      }
+      if (ok) toast.success(`Saved ${ok} toggle(s)`);
+    };
+
+    try {
+      const intents = await api.get("/cost/by-intent");
+      document.getElementById("c-intent-body").innerHTML = (intents.intents || []).map((i) => `
+        <tr>
+          <td><b>${escape(i.intent)}</b></td>
+          <td>${i.turn_count || 0}</td>
+          <td>$${Number(i.avg_cost || 0).toFixed(4)}</td>
+          <td>$${Number(i.total_cost || 0).toFixed(4)}</td>
+          <td>${Math.round(Number(i.avg_in || 0))}</td>
+          <td>${Math.round(Number(i.avg_out || 0))}</td>
+          <td>${Math.round(Number(i.avg_ms || 0))}</td>
+        </tr>`).join("") || `<tr><td colspan="7" class="muted">No data yet — bridge a few turns first.</td></tr>`;
+
+      const recs = await api.get("/cost/by-intent/recommendations");
+      document.getElementById("c-intent-recs").innerHTML = (recs.recommendations || [])
+        .map((r) => `<div>⚠ ${escape(r.recommendation)}</div>`).join("");
+    } catch (e) {
+      document.getElementById("c-intent-body").innerHTML = `<tr><td colspan="7" class="muted">${escape(e.message)}</td></tr>`;
+    }
+
+    try {
+      const sh = await api.get("/sessions/health");
+      const attn = sh.needs_attention || [];
+      document.getElementById("c-sess-attn").innerHTML = attn.map((s) => `
+        <tr>
+          <td><code>${escape(s.session_id)}</code></td>
+          <td>${escape(s.project_slug || "")}</td>
+          <td><b>${escape(s.health_status)}</b></td>
+          <td>$${Number(s.total_cost || 0).toFixed(4)}</td>
+          <td>${s.call_count || 0}</td>
+          <td>${s.artifacts_shipped || 0}</td>
+        </tr>`).join("") || `<tr><td colspan="6" class="muted">All sessions healthy (or no data yet).</td></tr>`;
+    } catch (e) {
+      document.getElementById("c-sess-attn").innerHTML = `<tr><td colspan="6" class="muted">${escape(e.message)}</td></tr>`;
+    }
+
+    try {
+      const rl = await api.get("/cost/rate-limit");
+      document.getElementById("c-rate-body").innerHTML = (rl.recent_blocks || []).map((b) => `
+        <tr>
+          <td class="muted">${escape((b.blocked_at || "").slice(11, 19))}</td>
+          <td>${escape(b.api_provider)}</td>
+          <td>${b.requested_tokens || 0}</td>
+          <td>${b.current_usage || 0}</td>
+          <td>${b.limit_value || 0}</td>
+          <td>${escape(b.resolution || "pending")}</td>
+        </tr>`).join("") || `<tr><td colspan="6" class="muted">No rate-limit blocks in the last 24h.</td></tr>`;
+    } catch (e) {
+      document.getElementById("c-rate-body").innerHTML = `<tr><td colspan="6" class="muted">${escape(e.message)}</td></tr>`;
+    }
+
   } catch (e) {
     body.innerHTML += `<p class="muted">Failed: ${escape(e.message)}</p>`;
   }

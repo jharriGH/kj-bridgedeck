@@ -25,6 +25,37 @@ async def list_live_sessions() -> list[dict]:
     return res.data or []
 
 
+@router.get("/health")
+async def session_health() -> dict:
+    """Return per-session health classification (healthy / stuck / thrashing /
+    expensive) backed by the `session_health_score` view from
+    cost_intel_phase2.sql. Returns {"sessions": []} if the view doesn't
+    exist yet."""
+    def _do():
+        return (
+            table("session_health_score")
+            .select("*")
+            .order("total_cost", desc=True)
+            .execute()
+        )
+    try:
+        res = await run_sync(_do)
+        rows = res.data or []
+    except Exception:
+        rows = []
+    needs_attention = [r for r in rows if r.get("health_status") in ("thrashing", "stuck", "expensive")]
+    return {
+        "sessions": rows,
+        "needs_attention": needs_attention,
+        "counts": {
+            "thrashing": sum(1 for r in rows if r.get("health_status") == "thrashing"),
+            "stuck":     sum(1 for r in rows if r.get("health_status") == "stuck"),
+            "expensive": sum(1 for r in rows if r.get("health_status") == "expensive"),
+            "healthy":   sum(1 for r in rows if r.get("health_status") == "healthy"),
+        },
+    }
+
+
 @router.get("/{session_id}")
 async def get_session(session_id: str) -> dict:
     row = await fetch_one("live_sessions", session_id=session_id)

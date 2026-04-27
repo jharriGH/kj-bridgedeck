@@ -113,6 +113,29 @@ kbd {
 .cost-pill[data-state="warn"]            { border-color: var(--warn); color: var(--warn); }
 .cost-pill[data-state="over"]            { border-color: var(--bad); color: var(--bad); }
 
+/* Rate-limit pill */
+.rate-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12px; cursor: pointer;
+}
+.rate-pill .rate-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--good);
+}
+.rate-pill[data-state="warn"] .rate-dot { background: var(--warn); }
+.rate-pill[data-state="over"] .rate-dot { background: var(--bad); animation: pulse 1.2s infinite; }
+.rate-pill[data-state="warn"]            { border-color: var(--warn); color: var(--warn); }
+.rate-pill[data-state="over"]            { border-color: var(--bad);  color: var(--bad); }
+
+/* Cheap-mode pill */
+.cheap-pill {
+  display: inline-flex; align-items: center;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--accent-soft); border: 1px solid var(--accent);
+  color: var(--accent); font-family: var(--mono); font-size: 12px;
+}
+
 /* Per-turn meta below an assistant bubble */
 .turn-meta {
   margin-top: 6px;
@@ -121,6 +144,21 @@ kbd {
   letter-spacing: 0.3px;
 }
 .turn-meta .warn { color: var(--warn); }
+
+/* Outcome buttons */
+.turn-outcome {
+  display: inline-flex; gap: 4px; margin-left: 8px;
+}
+.turn-outcome button {
+  background: transparent; border: 1px solid transparent;
+  padding: 0 4px; cursor: pointer; font-size: 14px; line-height: 1;
+  color: var(--text-dim); border-radius: 4px;
+}
+.turn-outcome button:hover { color: var(--accent); }
+.turn-outcome button[data-active="true"] {
+  color: var(--accent); border-color: var(--accent);
+  background: var(--accent-soft);
+}
 
 /* Inline confirm card for low_context_warning */
 .bridge-confirm {

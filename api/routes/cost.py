@@ -25,6 +25,10 @@ router = APIRouter()
 
 COST_LOG = "cost_log"
 COST_CAPS = "cost_caps"
+RATE_LIMIT_BLOCKS = "rate_limit_blocks"
+TURN_OUTCOMES = "turn_outcomes"
+COST_BY_INTENT_VIEW = "cost_by_intent_30d"
+SESSION_HEALTH_VIEW = "session_health_score"
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +248,165 @@ class CapPatch(BaseModel):
     cap_usd: Optional[float] = None
     behavior: Optional[str] = None
     enabled: Optional[bool] = None
+
+
+# ---------------------------------------------------------------------------
+# GET /cost/by-intent
+# ---------------------------------------------------------------------------
+
+
+@router.get("/by-intent")
+async def by_intent() -> dict:
+    """Per-intent rollup for the last 30 days. Backed by the
+    `cost_by_intent_30d` view added in cost_intel_phase2.sql. Returns
+    empty list if the view doesn't exist yet."""
+    try:
+        res = await run_sync(
+            lambda: table(COST_BY_INTENT_VIEW)
+            .select("*").order("total_cost", desc=True).execute()
+        )
+        return {"intents": res.data or []}
+    except Exception as exc:
+        logger.warning("by-intent view select failed: %s", exc)
+        return {"intents": []}
+
+
+@router.get("/by-intent/recommendations")
+async def by_intent_recommendations() -> dict:
+    """Cheap heuristic: any intent whose avg_cost > $0.05 AND avg_in > 5K
+    tokens is flagged as a candidate for tighter context scoping."""
+    try:
+        res = await run_sync(
+            lambda: table(COST_BY_INTENT_VIEW).select("*").execute()
+        )
+        rows = res.data or []
+    except Exception as exc:
+        logger.warning("recommendations select failed: %s", exc)
+        rows = []
+    recs: list[dict] = []
+    for r in rows:
+        avg_cost = float(r.get("avg_cost") or 0)
+        avg_in = float(r.get("avg_in") or 0)
+        avg_out = float(r.get("avg_out") or 0)
+        intent = r.get("intent") or "?"
+        if avg_cost > 0.05 and avg_in > 5000:
+            recs.append({
+                "intent": intent,
+                "avg_cost": round(avg_cost, 4),
+                "avg_tokens_in": int(avg_in),
+                "recommendation": (
+                    f"`{intent}` averages ${avg_cost:.3f}/turn with {int(avg_in)} input "
+                    "tokens. Consider tightening the context handler in "
+                    "bridge_core/context.py or routing to Haiku."
+                ),
+            })
+        if avg_out and avg_in / max(avg_out, 1) > 50:
+            recs.append({
+                "intent": intent,
+                "ratio_in_to_out": round(avg_in / max(avg_out, 1), 1),
+                "recommendation": (
+                    f"`{intent}` reads {int(avg_in)/max(avg_out,1):.0f}× more "
+                    "context than it produces. Likely over-fetching."
+                ),
+            })
+    return {"recommendations": recs}
+
+
+# ---------------------------------------------------------------------------
+# GET /cost/wasted-cost   GET /cost/refund-worthy
+# ---------------------------------------------------------------------------
+
+
+async def _wasted_aggregate(days: int = 30, refund_only: bool = False) -> dict:
+    """Sum cost_usd for bridge turns the user tagged 'wasted' (or
+    'error_refund' when refund_only=True). Joined client-side because
+    the supabase shim doesn't model FKs."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        outcomes_res = await run_sync(
+            lambda: table(TURN_OUTCOMES)
+            .select("*").gte("tagged_at", since.isoformat()).execute()
+        )
+        outcomes = outcomes_res.data or []
+    except Exception as exc:
+        logger.warning("turn_outcomes select failed: %s", exc)
+        outcomes = []
+    if refund_only:
+        outcomes = [o for o in outcomes if o.get("outcome") == "error_refund"]
+    else:
+        outcomes = [o for o in outcomes if o.get("outcome") in ("wasted", "error_refund")]
+    if not outcomes:
+        return {"total_usd": 0.0, "turns": 0, "details": []}
+    turn_ids = [o["turn_id"] for o in outcomes if o.get("turn_id")]
+    try:
+        cost_res = await run_sync(
+            lambda: table(COST_LOG).select("*").in_("turn_id", turn_ids).execute()
+        )
+        cost_rows = cost_res.data or []
+    except Exception as exc:
+        logger.warning("cost_log lookup failed: %s", exc)
+        cost_rows = []
+    by_turn = {r.get("turn_id"): r for r in cost_rows if r.get("turn_id")}
+    details: list[dict] = []
+    total = 0.0
+    for o in outcomes:
+        c = by_turn.get(o.get("turn_id"))
+        usd = float((c or {}).get("cost_usd") or 0)
+        total += usd
+        details.append({
+            "turn_id": o.get("turn_id"),
+            "outcome": o.get("outcome"),
+            "cost_usd": round(usd, 4),
+            "intent": (c or {}).get("intent"),
+            "tagged_at": o.get("tagged_at"),
+        })
+    return {
+        "total_usd": round(total, 4),
+        "turns": len(outcomes),
+        "details": sorted(details, key=lambda d: d["cost_usd"], reverse=True)[:50],
+    }
+
+
+@router.get("/wasted-cost")
+async def wasted_cost(days: int = 30) -> dict:
+    return await _wasted_aggregate(days=days, refund_only=False)
+
+
+@router.get("/refund-worthy")
+async def refund_worthy(days: int = 30) -> dict:
+    return await _wasted_aggregate(days=days, refund_only=True)
+
+
+# ---------------------------------------------------------------------------
+# GET /cost/rate-limit
+# ---------------------------------------------------------------------------
+
+
+@router.get("/rate-limit")
+async def rate_limit_state() -> dict:
+    """Live rate-limit usage for each provider + recent block events."""
+    # Live counters from the in-process tracker (single Render worker).
+    try:
+        from bridge_core import all_trackers
+        live = [t.snapshot() for t in all_trackers()]
+    except Exception as exc:
+        logger.warning("rate-limiter import failed: %s", exc)
+        live = []
+
+    # Last 24h of block events.
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    try:
+        blocks_res = await run_sync(
+            lambda: table(RATE_LIMIT_BLOCKS)
+            .select("*").gte("blocked_at", since.isoformat())
+            .order("blocked_at", desc=True).limit(50).execute()
+        )
+        blocks = blocks_res.data or []
+    except Exception as exc:
+        logger.warning("rate_limit_blocks select failed: %s", exc)
+        blocks = []
+
+    return {"live": live, "recent_blocks": blocks}
 
 
 @router.patch("/caps/{scope}")

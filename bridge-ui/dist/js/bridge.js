@@ -135,16 +135,72 @@ async function sendMessage(message, voice_input = false, audio_base64 = null, co
             break;
           case "done":
             const cost = (data.cost || 0).toFixed(4);
+            const cacheBits = [];
+            if (data.cache_creation_tokens) cacheBits.push(`cache+${data.cache_creation_tokens}`);
+            if (data.cache_read_tokens)     cacheBits.push(`cache-hit ${data.cache_read_tokens}`);
             setMeta(
               `intent: ${intentLabel} · model: ${modelLabel} · ` +
-              `${data.tokens_in || 0} → ${data.tokens_out || 0} tok · $${cost}`
+              `${data.tokens_in || 0} → ${data.tokens_out || 0} tok · $${cost}` +
+              (cacheBits.length ? ` · ${cacheBits.join(" · ")}` : "")
             );
             const meta = document.createElement("div");
             meta.className = "turn-meta";
             meta.textContent =
               `[${modelLabel || "?"}] · ${data.tokens_in || 0} in / ${data.tokens_out || 0} out · ` +
-              `$${cost} · ${data.duration_ms ? data.duration_ms + "ms" : ""}`;
+              `$${cost}` +
+              (cacheBits.length ? ` · ${cacheBits.join(" · ")}` : "") +
+              ` · ${data.duration_ms ? data.duration_ms + "ms" : ""}`;
+            // Append outcome-tagging buttons. We don't know the real turn_id
+            // (server-assigned in cost_log), so the buttons fire on
+            // conversationId + a synthetic per-bubble id and the server upserts.
+            const turnUuid = (crypto && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+            const outcome = document.createElement("span");
+            outcome.className = "turn-outcome";
+            outcome.innerHTML = `
+              <button data-out="useful" title="Useful — keep">👍</button>
+              <button data-out="partial" title="Partial">~</button>
+              <button data-out="wasted" title="Wasted spend">👎</button>
+              <button data-out="error_refund" title="Error refund-worthy">🗑</button>
+            `;
+            outcome.querySelectorAll("button").forEach((b) => {
+              b.onclick = async () => {
+                if (!conversationId) {
+                  toast.error("No conversation id yet — tag after first reply.");
+                  return;
+                }
+                try {
+                  await api.post(
+                    `/bridge/conversations/${conversationId}/turns/${turnUuid}/outcome`,
+                    { outcome: b.dataset.out }
+                  );
+                  outcome.querySelectorAll("button").forEach((x) => x.dataset.active = "false");
+                  b.dataset.active = "true";
+                  toast.success(`tagged: ${b.dataset.out}`);
+                } catch (e) {
+                  toast.error(`tag failed: ${e.message}`);
+                }
+              };
+            });
+            meta.appendChild(outcome);
             turn.appendChild(meta);
+            break;
+          case "rate_limit_warn":
+            const rw = document.createElement("div");
+            rw.className = "turn-meta warn";
+            rw.textContent = `⚠ rate-limit warn — ${data.current_usage}+${data.requested} > ${data.soft_limit} soft`;
+            turn.appendChild(rw);
+            break;
+          case "rate_limit_queued":
+            toast.info(`Rate-limit hit — queuing ${data.wait_seconds}s…`);
+            break;
+          case "model_downgraded":
+            const dw = document.createElement("div");
+            dw.className = "turn-meta warn";
+            dw.textContent = `⚠ downgraded ${data.from} → ${data.to} (${data.reason})`;
+            turn.appendChild(dw);
+            break;
+          case "cheap_mode":
+            setMeta(`cheap mode — Haiku, half output`);
             break;
           case "low_context_warning":
             renderLowContextConfirm(turn, data, message);

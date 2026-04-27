@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Union
 
 from anthropic import AsyncAnthropic
 
@@ -21,14 +21,25 @@ COST_TABLE: dict[str, dict[str, float]] = {
 
 DEFAULT_RATES = {"in": 3.00, "out": 15.00}
 
+# Anthropic prompt-caching multipliers (Anthropic 2026, verified pricing
+# documentation as of Jan 2026 cutoff).
+CACHE_WRITE_MULTIPLIER = 1.25  # 25% premium on first use
+CACHE_READ_MULTIPLIER = 0.10   # 90% discount on subsequent reads
+
 
 def calculate_cost(usage, model: str) -> float:
     rates = COST_TABLE.get(model, DEFAULT_RATES)
+    base_in = rates["in"]
+    base_out = rates["out"]
     tokens_in = getattr(usage, "input_tokens", 0) or 0
     tokens_out = getattr(usage, "output_tokens", 0) or 0
+    cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
     return (
-        tokens_in * rates["in"] / 1_000_000
-        + tokens_out * rates["out"] / 1_000_000
+        tokens_in       * base_in  / 1_000_000
+        + cache_write   * base_in  * CACHE_WRITE_MULTIPLIER / 1_000_000
+        + cache_read    * base_in  * CACHE_READ_MULTIPLIER  / 1_000_000
+        + tokens_out    * base_out / 1_000_000
     )
 
 
@@ -48,15 +59,20 @@ MAX_OUTPUT_TOKENS_HARD_CAP = 8192
 async def stream_claude_response(
     client: AsyncAnthropic,
     model: str,
-    system_prompt: str,
+    system_prompt: Union[str, list[dict]],
     messages: list[dict],
     max_tokens: int = MAX_OUTPUT_TOKENS_DEFAULT,
     temperature: float = 0.7,
 ) -> AsyncGenerator[SSEEvent, None]:
     """Async generator yielding `SSEEvent`s for each chunk plus a final `done`.
 
+    `system_prompt` can be either a plain string or a list of text blocks
+    (each optionally carrying ``cache_control``). The list form unlocks
+    Anthropic prompt caching — see prompts.build_cached_system_blocks.
+
     The `done` event's JSON payload carries `full_text`, token counts, cost,
-    stop reason, and model. Callers should capture that to persist the turn."""
+    stop reason, and model — plus `cache_creation_tokens` /
+    `cache_read_tokens` so callers can audit cache hit rate."""
     full_text = ""
     async with client.messages.stream(
         model=model,
@@ -71,14 +87,17 @@ async def stream_claude_response(
 
         final = await stream.get_final_message()
         cost = calculate_cost(final.usage, model)
+        usage = final.usage
 
         yield SSEEvent(
             event="done",
             data=json.dumps(
                 {
                     "full_text": full_text,
-                    "tokens_in": getattr(final.usage, "input_tokens", 0),
-                    "tokens_out": getattr(final.usage, "output_tokens", 0),
+                    "tokens_in": getattr(usage, "input_tokens", 0),
+                    "tokens_out": getattr(usage, "output_tokens", 0),
+                    "cache_creation_tokens": getattr(usage, "cache_creation_input_tokens", 0) or 0,
+                    "cache_read_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
                     "cost": cost,
                     "stop_reason": getattr(final, "stop_reason", None),
                     "model": model,

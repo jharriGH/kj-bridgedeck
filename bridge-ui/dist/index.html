@@ -25,6 +25,13 @@
         <span>$<span id="today-spend">0.00</span> today</span>
         <span id="bridge-turn-cost" class="hidden"> · turn $<span id="turn-amount">0.000</span></span>
       </span>
+      <span class="rate-pill" id="rate-pill" title="Anthropic input tokens / minute (click for blocks)">
+        <span class="rate-dot"></span>
+        <span><span id="rate-current">0</span>/<span id="rate-hard">50K</span></span>
+      </span>
+      <span class="cheap-pill hidden" id="cheap-pill" title="Cheap mode active — Haiku only, half output cap">
+        💰 cheap
+      </span>
       <span class="health-pill" id="health-pill" title="Click for details">
         <span class="health-dot" data-status="unknown"></span>
         <span id="health-label">checking…</span>

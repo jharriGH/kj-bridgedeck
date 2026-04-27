@@ -110,6 +110,43 @@ document.getElementById("cost-pill").addEventListener("click", () => {
 pollCostLive();
 setInterval(pollCostLive, 5000);
 
+// --- Rate-limit pill (poll /cost/rate-limit every 7s) --------------------
+async function pollRateLimit() {
+  try {
+    const r = await api.get("/cost/rate-limit");
+    const ant = (r.live || []).find((t) => t.name === "anthropic_input_tpm");
+    if (!ant) return;
+    const cur = ant.current_usage || 0;
+    const hard = ant.hard_limit || 50000;
+    const soft = ant.soft_limit || 40000;
+    document.getElementById("rate-current").textContent = cur >= 1000 ? `${(cur/1000).toFixed(1)}K` : `${cur}`;
+    document.getElementById("rate-hard").textContent = hard >= 1000 ? `${(hard/1000).toFixed(0)}K` : `${hard}`;
+    const pill = document.getElementById("rate-pill");
+    pill.dataset.state = cur >= hard ? "over" : cur >= soft ? "warn" : "ok";
+    pill.title = `Anthropic input: ${cur}/${hard} per 60s · soft @ ${soft}`;
+  } catch {}
+}
+document.getElementById("rate-pill").addEventListener("click", () => {
+  document.getElementById("open-admin").click();
+  setTimeout(() => {
+    const tab = document.querySelector('.admin-nav-item[data-admin-panel="cost"]');
+    if (tab) tab.click();
+  }, 50);
+});
+pollRateLimit();
+setInterval(pollRateLimit, 7000);
+
+// --- Cheap-mode pill (read settings.bridge.cheap_mode, poll every 30s) ---
+async function pollCheapMode() {
+  try {
+    const r = await api.get("/settings/bridge");
+    const isOn = r.cheap_mode === true || r.cheap_mode === "true";
+    document.getElementById("cheap-pill").classList.toggle("hidden", !isOn);
+  } catch {}
+}
+pollCheapMode();
+setInterval(pollCheapMode, 30000);
+
 // --- Mount feature modules -----------------------------------------------
 monitor.init();
 terminal.init();

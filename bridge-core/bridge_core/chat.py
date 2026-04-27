@@ -31,7 +31,11 @@ from .claude_stream import (
 from .context import ContextGatherer
 from .directives import parse_directives, strip_directives
 from .intent import IntentRouter
-from .prompts import build_system_prompt
+from .prompts import build_cached_system_blocks, build_system_prompt
+from .rate_limiter import (
+    anthropic_input_tokens_tracker,
+    wait_for_capacity,
+)
 from .utils import now_iso
 from .voice import VoiceService
 
@@ -52,12 +56,20 @@ ACTION_QUEUE_TABLE = "kjcodedeck.action_queue"
 HISTORY_LOG_TABLE = "kjcodedeck.history_log"
 COST_LOG_TABLE = "kjcodedeck.cost_log"
 COST_CAPS_TABLE = "kjcodedeck.cost_caps"
+RATE_LIMIT_BLOCKS_TABLE = "kjcodedeck.rate_limit_blocks"
 AUTO_SAVE_TURN_THRESHOLD = 6
 
 # GUARDRAIL 2 — token budget enforcement.
-MAX_CONTEXT_TOKENS = 120_000
-MAX_HISTORY_TURNS = 6
-LOW_CONTEXT_THRESHOLD = 3  # F9 — empty-context warning
+# Phase 2: lowered from 120K → 35K because Anthropic org-level rate limit
+# is 50K input tokens/minute. We want headroom for the system-prompt body
+# + cache-creation overhead even on a fresh cache miss. Empire context
+# alone has been observed at 148K tokens — those queries now hit the
+# hard-truncate path and end up with a ~25K-char excerpt instead of a 429.
+MAX_CONTEXT_TOKENS = 35_000
+MAX_HISTORY_TURNS = 4
+LOW_CONTEXT_THRESHOLD = 3                   # F9 — empty-context warning
+PREEMPTIVE_HAIKU_THRESHOLD_TOKENS = 15_000  # over this, force Haiku
+HARD_TRUNCATE_CHAR_CAP = 25_000             # final stop-gap on context dump
 
 
 def estimate_tokens(text: str) -> int:
@@ -124,6 +136,20 @@ class BridgeChatService:
     async def chat(self, request: BridgeChatRequest) -> AsyncGenerator[SSEEvent, None]:
         turn_started = time.time()
 
+        # 0. (Phase 2) Read global panic switch. cheap_mode pins the model
+        # to Haiku, skips voice synthesis, halves the output cap. Settable
+        # from the Cost admin tab so Jim can throttle empire-wide spend
+        # with one click.
+        cheap_mode = bool(await self._setting("bridge", "cheap_mode", False))
+        cache_enabled = bool(
+            await self._setting("bridge", "prompt_caching_enabled", True)
+        )
+        auto_retry = bool(
+            await self._setting("bridge", "auto_retry_on_rate_limit", True)
+        )
+        if cheap_mode:
+            yield SSEEvent(event="cheap_mode", data=json.dumps({"active": True}))
+
         # 1. Voice input → transcribe
         if request.voice_input and request.audio_base64:
             voice_started = time.time()
@@ -188,8 +214,12 @@ class BridgeChatService:
             sources = BridgeSources()
         yield SSEEvent(event="sources", data=sources.model_dump_json())
 
-        # 5. Choose model (F5: fast intents always Haiku unless forced Sonnet)
-        model = await self._choose_model(intent_data["intent"], request.force_model)
+        # 5. Choose model. Cheap mode overrides everything; otherwise the
+        # FAST_INTENT routing applies (F5).
+        if cheap_mode:
+            model = await self._setting("bridge", "haiku_model", DEFAULT_HAIKU)
+        else:
+            model = await self._choose_model(intent_data["intent"], request.force_model)
 
         # 6. (F11) Cap enforcement — empire_daily / empire_weekly / project_daily.
         caps = await self._load_caps()
@@ -249,6 +279,8 @@ class BridgeChatService:
             )
 
         # 8. (G2) Token budget — trim sources + history if over budget.
+        # force_full_context=true bypasses these checks (caller is opting
+        # into a higher-cost call after seeing the empty-context warning).
         ctx_tokens = _sources_token_estimate(sources)
         history_text = "\n".join(
             (m.get("content") or "") if isinstance(m, dict) else "" for m in conv_history
@@ -256,7 +288,9 @@ class BridgeChatService:
         history_tokens = estimate_tokens(history_text)
         message_tokens = estimate_tokens(request.message)
         total_in = ctx_tokens + history_tokens + message_tokens
-        if total_in > MAX_CONTEXT_TOKENS:
+        force_full = getattr(request, "force_full_context", False)
+
+        if not force_full and total_in > MAX_CONTEXT_TOKENS:
             sources = _trim_sources(sources)
             ctx_tokens = _sources_token_estimate(sources)
             total_in = ctx_tokens + history_tokens + message_tokens
@@ -266,20 +300,58 @@ class BridgeChatService:
                     "reason": "over_token_budget",
                     "limit": MAX_CONTEXT_TOKENS,
                     "after_trim_tokens": total_in,
+                    "stage": "soft_trim",
                 }),
             )
-        if total_in > MAX_CONTEXT_TOKENS:
-            # Hard truncate the sources JSON.
-            keep = MAX_CONTEXT_TOKENS - history_tokens - message_tokens - 1000
+        if not force_full and total_in > MAX_CONTEXT_TOKENS:
+            # Hard truncate to a fixed character cap. Phase 2 reduced this
+            # from "leave the leftover budget" (which still oversized when
+            # source dump was already small relative to budget) to a flat
+            # 25K-char ceiling — keeps the cache-write block under the 50K
+            # input-tokens-per-minute Anthropic org cap.
             payload = sources.model_dump()
-            blob = json.dumps(payload, default=str)
+            blob = json.dumps(payload, default=str)[:HARD_TRUNCATE_CHAR_CAP]
             sources = BridgeSources(
-                projects=[{"_truncated_context": blob[: max(2000, keep * 4)]}]
+                projects=[{"_truncated_context": blob, "_truncated_at_chars": HARD_TRUNCATE_CHAR_CAP}]
+            )
+            ctx_tokens = _sources_token_estimate(sources)
+            total_in = ctx_tokens + history_tokens + message_tokens
+            yield SSEEvent(
+                event="context_truncated",
+                data=json.dumps({
+                    "reason": "hard_char_cap",
+                    "char_cap": HARD_TRUNCATE_CHAR_CAP,
+                    "after_truncate_tokens": total_in,
+                    "stage": "hard_truncate",
+                }),
             )
 
-        # 9. (G4) Per-turn cost ceiling — pre-flight check.
+        # 8b. (Phase 2) Preemptive Haiku — large payloads always go to
+        # Haiku unless cheap_mode already pinned us there or the user
+        # forced Sonnet. Cheaper, faster, less likely to 429.
+        if (
+            not cheap_mode
+            and total_in > PREEMPTIVE_HAIKU_THRESHOLD_TOKENS
+            and "haiku" not in (model or "")
+            and not (request.force_model and request.force_model.lower().startswith("sonnet"))
+        ):
+            new_model = await self._setting("bridge", "haiku_model", DEFAULT_HAIKU)
+            yield SSEEvent(
+                event="model_downgraded",
+                data=json.dumps({
+                    "from": model, "to": new_model,
+                    "reason": "preemptive_haiku_threshold",
+                    "tokens_in_estimate": total_in,
+                    "threshold": PREEMPTIVE_HAIKU_THRESHOLD_TOKENS,
+                }),
+            )
+            model = new_model
+
+        # 9. (G4) Per-turn cost ceiling — pre-flight check. Cheap mode
+        # halves the default output cap.
         per_turn_cap = await self._per_turn_cap()
-        max_out = min(request.max_tokens or MAX_OUTPUT_TOKENS_DEFAULT, MAX_OUTPUT_TOKENS_HARD_CAP)
+        out_default = MAX_OUTPUT_TOKENS_DEFAULT // 2 if cheap_mode else MAX_OUTPUT_TOKENS_DEFAULT
+        max_out = min(request.max_tokens or out_default, MAX_OUTPUT_TOKENS_HARD_CAP)
         est_cost = _estimate_turn_cost(model, total_in, max_out)
         if per_turn_cap > 0 and est_cost > per_turn_cap:
             yield SSEEvent(
@@ -293,26 +365,109 @@ class BridgeChatService:
             )
             return
 
-        # 10. Build system prompt
-        system_prompt = build_system_prompt(
-            sources=sources,
-            conversation_history=conv_history,
-            active_sessions=await self._active_sessions_count(),
-            today_spend=await self._today_spend(),
-        )
+        # 9b. (Phase 2 / Feature 1+2) Anthropic input-token rate-limit
+        # pre-check. If the request would push us over the per-minute hard
+        # cap, either queue + retry (when auto_retry is on) or fail
+        # immediately. Logs a row in rate_limit_blocks either way.
+        tracker = anthropic_input_tokens_tracker()
+        allowed, status, msg = tracker.can_consume(total_in)
+        if not allowed:
+            block_id = await self._log_rate_block(
+                api_provider="anthropic",
+                requested_tokens=total_in,
+                current_usage=tracker.current_usage(),
+                limit_value=tracker.HARD_LIMIT,
+            )
+            if not auto_retry:
+                yield SSEEvent(event="error", data=json.dumps({
+                    "kind": "rate_limit_block",
+                    "provider": "anthropic",
+                    "current_usage": tracker.current_usage(),
+                    "requested": total_in,
+                    "limit": tracker.HARD_LIMIT,
+                    "message": msg,
+                }))
+                await self._resolve_rate_block(block_id, "cancelled")
+                return
+            eta = tracker.seconds_until_capacity(total_in)
+            yield SSEEvent(event="rate_limit_queued", data=json.dumps({
+                "provider": "anthropic",
+                "wait_seconds": round(eta, 1),
+                "current_usage": tracker.current_usage(),
+                "requested": total_in,
+            }))
+            ok, waited = await wait_for_capacity(tracker, total_in)
+            if not ok:
+                yield SSEEvent(event="error", data=json.dumps({
+                    "kind": "rate_limit_timeout",
+                    "waited_seconds": round(waited, 1),
+                    "message": "Wait would exceed 30s; aborting. Try again in a minute or enable cheap_mode.",
+                }))
+                await self._resolve_rate_block(block_id, "timeout")
+                return
+            await self._resolve_rate_block(block_id, "queued_succeeded")
+        elif status == "warn":
+            yield SSEEvent(event="rate_limit_warn", data=json.dumps({
+                "provider": "anthropic",
+                "current_usage": tracker.current_usage(),
+                "requested": total_in,
+                "soft_limit": tracker.SOFT_LIMIT,
+            }))
+        # Reserve the budget so concurrent turns don't double-spend.
+        tracker.consume(total_in)
+
+        # 10. Build system prompt — list-of-blocks form so Anthropic can
+        # cache the stable role/voice/capabilities preamble. Cheap mode +
+        # explicit prompt_caching_enabled=false fall back to the plain
+        # string form (no cache_control, no caching).
+        if cache_enabled and not cheap_mode:
+            system_prompt: Any = build_cached_system_blocks(
+                sources=sources,
+                conversation_history=conv_history,
+                active_sessions=await self._active_sessions_count(),
+                today_spend=await self._today_spend(),
+                cache_enabled=True,
+            )
+        else:
+            system_prompt = build_system_prompt(
+                sources=sources,
+                conversation_history=conv_history,
+                active_sessions=await self._active_sessions_count(),
+                today_spend=await self._today_spend(),
+            )
 
         # 11. Stream Claude response
         stream_started = time.time()
         messages = [*conv_history, {"role": "user", "content": request.message}]
         full_text = ""
         final_meta: dict[str, Any] = {}
-        async for event in stream_claude_response(
-            self.anthropic, model, system_prompt, messages, max_tokens=max_out
-        ):
-            if event.event == "done":
-                final_meta = json.loads(event.data)
-                full_text = final_meta.get("full_text", "")
-            yield event
+        try:
+            async for event in stream_claude_response(
+                self.anthropic, model, system_prompt, messages, max_tokens=max_out
+            ):
+                if event.event == "done":
+                    final_meta = json.loads(event.data)
+                    full_text = final_meta.get("full_text", "")
+                yield event
+        except Exception as exc:
+            # Anthropic raised mid-stream. Most often a 429 that escaped our
+            # pre-check (e.g. concurrent turn already tripped the limit).
+            err_text = str(exc)
+            is_429 = "rate_limit" in err_text.lower() or "429" in err_text
+            if is_429:
+                await self._log_rate_block(
+                    api_provider="anthropic",
+                    requested_tokens=total_in,
+                    current_usage=tracker.current_usage(),
+                    limit_value=tracker.HARD_LIMIT,
+                    resolution="post_call_429",
+                )
+            yield SSEEvent(event="error", data=json.dumps({
+                "kind": "anthropic_error",
+                "is_rate_limit": is_429,
+                "message": err_text[:400],
+            }))
+            return
         stream_duration_ms = int((time.time() - stream_started) * 1000)
 
         # 12. Parse + queue directives
@@ -473,6 +628,45 @@ class BridgeChatService:
         rows = await self._supabase_run(_do)
         data = getattr(rows, "data", None) or []
         return float(sum(float(r.get("cost_usd") or 0) for r in data))
+
+    async def _log_rate_block(
+        self,
+        *,
+        api_provider: str,
+        requested_tokens: int,
+        current_usage: int,
+        limit_value: int,
+        queue_depth: int = 0,
+        resolution: str | None = None,
+    ) -> str | None:
+        """Insert a rate_limit_blocks row, return its id or None on failure."""
+        payload = {
+            "id": str(uuid4()),
+            "api_provider": api_provider,
+            "requested_tokens": int(requested_tokens),
+            "current_usage": int(current_usage),
+            "limit_value": int(limit_value),
+            "queue_depth": int(queue_depth),
+        }
+        if resolution:
+            payload["resolution"] = resolution
+            payload["resolved_at"] = datetime.now(timezone.utc).isoformat()
+        await self._supabase_run(
+            lambda: self.supabase.table(RATE_LIMIT_BLOCKS_TABLE).insert(payload).execute()
+        )
+        return payload["id"]
+
+    async def _resolve_rate_block(self, block_id: str | None, resolution: str) -> None:
+        if not block_id:
+            return
+        patch = {
+            "resolution": resolution,
+            "resolved_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await self._supabase_run(
+            lambda: self.supabase.table(RATE_LIMIT_BLOCKS_TABLE)
+            .update(patch).eq("id", block_id).execute()
+        )
 
     async def _compress_history(self, conv_id: UUID, history: list[dict]) -> str | None:
         """(F7) Summarize older turns via Haiku. Caches the digest on the

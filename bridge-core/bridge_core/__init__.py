@@ -8,6 +8,12 @@ from .voice import VoiceService
 from .actions import ActionExecutor
 from .intent import IntentRouter
 from .context import ContextGatherer
+from .rate_limiter import (
+    SlidingWindowRateTracker,
+    anthropic_input_tokens_tracker,
+    whisper_requests_tracker,
+    all_trackers,
+)
 
 __all__ = [
     "BridgeChatService",
@@ -15,6 +21,10 @@ __all__ = [
     "ActionExecutor",
     "IntentRouter",
     "ContextGatherer",
+    "SlidingWindowRateTracker",
+    "anthropic_input_tokens_tracker",
+    "whisper_requests_tracker",
+    "all_trackers",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

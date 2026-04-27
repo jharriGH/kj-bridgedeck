@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from services.supabase_client import run_sync, table
+from services.supabase_client import run_sync, table  # noqa: F401
 from shared.contracts import BridgeChatRequest
 
 logger = logging.getLogger("bridgedeck.api.bridge")
@@ -156,6 +156,38 @@ async def transcribe(request: Request, body: TranscribeRequest):
 class SynthesizeRequest(BaseModel):
     text: str
     voice: Optional[str] = None
+
+
+class OutcomeTag(BaseModel):
+    outcome: str  # 'useful' | 'partial' | 'wasted' | 'error_refund'
+
+
+@router.post("/conversations/{conversation_id}/turns/{turn_id}/outcome")
+async def tag_turn_outcome(
+    conversation_id: str, turn_id: str, body: OutcomeTag
+):
+    if body.outcome not in ("useful", "partial", "wasted", "error_refund"):
+        raise HTTPException(400, "outcome must be useful|partial|wasted|error_refund")
+
+    payload = {
+        "turn_id": turn_id,
+        "conversation_id": conversation_id,
+        "outcome": body.outcome,
+    }
+
+    def _do():
+        return (
+            table("turn_outcomes")
+            .upsert(payload, on_conflict="turn_id")
+            .execute()
+        )
+    try:
+        res = await run_sync(_do)
+    except Exception as exc:
+        logger.warning("turn_outcomes upsert failed: %s", exc)
+        raise HTTPException(500, f"upsert failed: {exc}")
+    rows = res.data or []
+    return {"ok": True, "row": rows[0] if rows else payload}
 
 
 @router.post("/voice/synthesize")
