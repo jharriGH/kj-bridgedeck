@@ -130,6 +130,20 @@ if the parent domain is on Cloudflare.
 
 ---
 
+## 4a. Apply the brain_extras migration (optional but recommended)
+
+`POST /projects/sync` syncs Brain projects into Supabase. Brain returns
+group/status/next_action fields the original schema doesn't track. The
+sync route silently drops them until you add an extras column:
+
+```sql
+\i supabase/migrations/20260427_brain_extras.sql
+-- or paste the file contents into the Supabase SQL Editor
+```
+
+Skip this and sync still works — basic fields (id/label/desc/emoji/color)
+land normally; extras are dropped.
+
 ## 4. Update Supabase Piper paths (deferred SQL)
 
 Path A could not write to Supabase (no anon/service key was available
