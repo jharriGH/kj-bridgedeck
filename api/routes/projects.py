@@ -98,43 +98,62 @@ async def get_project(slug: str) -> dict:
 
 @router.post("/sync")
 async def sync_from_brain() -> dict:
-    """Pull project list from Brain /codedeck/projects and upsert locally."""
+    """Pull project list from Brain /projects and upsert locally.
+
+    Brain v1.3.2 shape (verified 2026-04-27):
+        {"projects": [{"id","label","color","emoji","desc"?,"group"?,
+                       "status"?,"next_action"?}, ...], "count": N}
+    The first entry {"id":"all"} is a UI placeholder — skipped here.
+
+    Field mapping: id→slug, label→display_name, desc→description.
+    emoji/color/group/status/next_action passed through as-is."""
     try:
-        brain_projects = await BrainClient().projects()
+        resp = await BrainClient().projects()
     except Exception as e:
         raise HTTPException(502, f"brain unreachable: {e}")
 
+    brain_projects = resp.get("projects", []) if isinstance(resp, dict) else (resp or [])
     now = datetime.now(timezone.utc).isoformat()
     synced = 0
+    synced_slugs: list[str] = []
 
     for bp in brain_projects:
-        slug = bp.get("slug")
+        if bp.get("id") == "all":
+            continue
+        slug = bp.get("id")
         if not slug:
             continue
         existing = await fetch_one("projects", slug=slug)
         payload = {
             "slug": slug,
-            "display_name": bp.get("display_name") or bp.get("name") or slug,
+            "display_name": bp.get("label") or slug,
             "emoji": bp.get("emoji"),
             "color": bp.get("color") or "#00E5FF",
-            "repo_path": bp.get("repo_url") or bp.get("repo_path"),
-            "description": bp.get("description"),
+            "description": bp.get("desc"),
+            "group": bp.get("group"),
+            "status": bp.get("status"),
+            "next_action": bp.get("next_action"),
             "last_synced_from_brain": now,
         }
+        # Drop None values so we don't overwrite existing fields with NULLs.
+        payload = {k: v for k, v in payload.items() if v is not None}
+        # `slug` is the PK; always present.
+        payload["slug"] = slug
         if existing:
             await sb_update("projects", payload, slug=slug)
         else:
             await insert("projects", payload)
         synced += 1
+        synced_slugs.append(slug)
 
     await history_logger.log(
         event_type="project.synced_from_brain",
         event_category="action",
         actor="api",
         action="sync_projects",
-        details={"synced": synced},
+        details={"synced": synced, "projects": synced_slugs},
     )
-    return {"ok": True, "synced": synced}
+    return {"synced": synced, "projects": synced_slugs}
 
 
 @router.post("")

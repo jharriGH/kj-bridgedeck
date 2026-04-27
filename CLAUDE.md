@@ -31,6 +31,58 @@
 6. **Dual-path Claude Code support.** Watcher must read both `C:\Users\Jim\.claude` (native Windows) and `\\wsl$\Ubuntu\home\jim\.claude` (WSL2).
 7. **Windows-first.** WSL2 Ubuntu is available but UI, watcher, and installer all target Windows 11.
 
+## Brain Endpoint Verification (MANDATORY)
+
+BEFORE calling any Brain endpoint:
+
+1. `curl https://jim-brain-production.up.railway.app/health` → confirm version
+2. `curl <exact endpoint>` → confirm 200 before building any code that depends on it
+3. Log the actual response shape into the session notes
+
+**Never assume an endpoint exists. Always verify.**
+
+### Brain v1.4.0 confirmed endpoints
+
+GET endpoints:
+- `/health`
+- `/context`
+- `/projects`                              ← project list, response: `{"projects":[...], "count":N}`
+- `/cards`
+- `/logs`
+- `/memory/search`
+- `/memory/all`
+- `/cards/{id}`
+- `/codedeck/review-queue`
+- `/codedeck/context/{project_slug}`
+
+POST endpoints:
+- `/state`
+- `/memory`
+- `/log`
+- `/cards`
+- `/codedeck/handoff`
+- `/codedeck/flush-memory-queue`
+- `/codedeck/approve-review/{index}`
+
+PATCH endpoints:
+- `/state`
+- `/projects`
+- `/agents`
+
+DELETE endpoints:
+- `/cards/{id}`
+- `/codedeck/review-queue/{index}`
+
+### Brain field mapping for projects
+
+When syncing from `/projects`:
+
+- `brain["id"]`    → `kjcodedeck.projects.slug`
+- `brain["label"]` → `kjcodedeck.projects.display_name`
+- `brain["desc"]`  → `kjcodedeck.projects.description`
+- `emoji`, `color`, `group`, `status`, `next_action`: as-is
+- Skip the `{"id":"all"}` pseudo-project — it's a UI placeholder
+
 ## Agent boundaries (parallel build)
 
 - **Bridge-A** — Schema + shared contracts + repo scaffold (foundation, runs first)

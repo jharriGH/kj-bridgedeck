@@ -14,7 +14,12 @@ logger = logging.getLogger("bridgedeck.api.brain")
 class BrainClient:
     def __init__(self) -> None:
         self.base = settings.BRAIN_API_URL.rstrip("/")
+        # Brain (verified live 2026-04-27 against jim-brain-production.up.railway.app
+        # v1.3.2) requires `x-brain-key`. The legacy X-API-Key / Bearer headers
+        # are kept for backwards-compat with older Brain builds — Brain ignores
+        # unknown headers, so sending all three is harmless.
         self.headers = {
+            "x-brain-key": settings.BRAIN_KEY,
             "X-API-Key": settings.BRAIN_KEY,
             "Authorization": f"Bearer {settings.BRAIN_KEY}",
         }
@@ -57,8 +62,13 @@ class BrainClient:
             "GET", f"/codedeck/context/{slug}", params={"depth": depth}
         )
 
-    async def projects(self) -> list[dict]:
-        return await self._request("GET", "/codedeck/projects")
+    async def projects(self) -> dict:
+        """GET /projects — verified shape: {"projects":[...], "count":N}.
+
+        Each project: {id, label, color, emoji, desc?, group?, status?,
+        next_action?}. Includes a {"id":"all"} pseudo-project that callers
+        must filter."""
+        return await self._request("GET", "/projects")
 
     async def create_project(self, project: dict) -> dict:
         return await self._request("POST", "/codedeck/projects", json=project)
