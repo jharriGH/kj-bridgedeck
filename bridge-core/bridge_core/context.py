@@ -6,8 +6,9 @@ don't blow token budget pulling everything on every turn.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -19,6 +20,40 @@ REQUEST_TIMEOUT = 15.0
 SESSION_HANDOFFS_TABLE = "kjcodedeck.session_handoffs"
 LIVE_SESSIONS_TABLE = "kjcodedeck.live_sessions"
 SESSION_ARCHIVE_TABLE = "kjcodedeck.session_archive"
+
+
+class _BrainCache:
+    """In-memory TTL cache for Brain GETs that we hit on every Bridge turn.
+
+    Brain `/projects` and `/context` are slow + heavy and rarely change
+    inside a 60-second window. Cache them so back-to-back Bridge turns
+    don't re-fetch identical payloads."""
+
+    _cache: dict[str, tuple[Any, float]] = {}
+
+    @classmethod
+    async def get_or_fetch(
+        cls,
+        key: str,
+        fetcher: Callable[[], Awaitable[Any]],
+        ttl_seconds: int = 60,
+    ) -> Any:
+        now = time.time()
+        hit = cls._cache.get(key)
+        if hit is not None:
+            value, expires_at = hit
+            if now < expires_at:
+                return value
+        value = await fetcher()
+        cls._cache[key] = (value, now + ttl_seconds)
+        return value
+
+    @classmethod
+    def invalidate(cls, key: str | None = None) -> None:
+        if key is None:
+            cls._cache.clear()
+        else:
+            cls._cache.pop(key, None)
 
 
 class ContextGatherer:
@@ -74,9 +109,14 @@ class ContextGatherer:
         message: str,
         time_range_days: int | None,
     ) -> None:
-        all_projects = await self._safe_get(client, "/projects")
+        all_projects = await self._cached_get(client, "/projects")
+        if isinstance(all_projects, dict):
+            all_projects = all_projects.get("projects") or []
         if isinstance(all_projects, list):
-            sources.projects = [p for p in all_projects if p.get("status") == "in_progress"]
+            sources.projects = [
+                p for p in all_projects
+                if p.get("status") == "in_progress" and p.get("id") != "all"
+            ]
 
     async def _gather_fact_recall(
         self,
@@ -126,9 +166,26 @@ class ContextGatherer:
         message: str,
         time_range_days: int | None,
     ) -> None:
-        ctx = await self._safe_get(client, "/context")
-        if ctx is not None:
-            sources.projects = [ctx]
+        # GUARDRAIL 3: empire_summary uses lightweight /projects (slug + label
+        # + status) + a scoped handoffs query. Never /context — that endpoint
+        # returns full memory bundles for every project and easily blows the
+        # 200K input-token cap on a multi-project empire.
+        projects = await self._cached_get(client, "/projects")
+        if isinstance(projects, dict):
+            projects = projects.get("projects") or []
+        if isinstance(projects, list):
+            slim = [
+                {
+                    "slug": p.get("id"),
+                    "label": p.get("label"),
+                    "status": p.get("status"),
+                    "next_action": p.get("next_action"),
+                    "group": p.get("group"),
+                }
+                for p in projects
+                if p.get("id") and p.get("id") != "all"
+            ]
+            sources.projects = slim
         days = time_range_days or 7
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         rows = await self._supabase_select(
@@ -159,9 +216,11 @@ class ContextGatherer:
         message: str,
         time_range_days: int | None,
     ) -> None:
-        projects = await self._safe_get(client, "/projects")
+        projects = await self._cached_get(client, "/projects")
+        if isinstance(projects, dict):
+            projects = projects.get("projects") or []
         if isinstance(projects, list):
-            sources.projects = projects
+            sources.projects = [p for p in projects if p.get("id") != "all"]
 
     async def _gather_save_memory(
         self,
@@ -182,7 +241,7 @@ class ContextGatherer:
         message: str,
         time_range_days: int | None,
     ) -> None:
-        ctx = await self._safe_get(client, "/context")
+        ctx = await self._cached_get(client, "/context")
         if ctx is not None:
             sources.projects = [ctx]
 
@@ -192,6 +251,23 @@ class ContextGatherer:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    async def _cached_get(
+        self,
+        client: httpx.AsyncClient,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        ttl_seconds: int = 60,
+    ) -> Any:
+        """`_safe_get` but with a 60-second in-memory cache. Use for high-
+        traffic, slow-moving GETs (e.g. /projects, /context)."""
+        cache_key = f"GET {path} {sorted((params or {}).items())}"
+        return await _BrainCache.get_or_fetch(
+            cache_key,
+            lambda: self._safe_get(client, path, params=params),
+            ttl_seconds=ttl_seconds,
+        )
 
     async def _safe_get(
         self,

@@ -18,6 +18,7 @@ const PANELS = {
   actions:    { label: "Action queue", render: renderActions  },
   handoffs:   { label: "Handoffs",   render: renderHandoffs   },
   stats:      { label: "Stats",      render: renderStats      },
+  cost:       { label: "Cost",       render: renderCost       },
 };
 
 // --- Connection ----------------------------------------------------------
@@ -215,6 +216,120 @@ async function renderStats(body) {
     document.getElementById("stats-out").textContent = JSON.stringify(r, null, 2);
   } catch (e) {
     document.getElementById("stats-out").textContent = `Failed: ${e.message}`;
+  }
+}
+
+// --- Cost ----------------------------------------------------------------
+
+async function renderCost(body) {
+  body.innerHTML = `
+    <h3>Cost intelligence</h3>
+    <div class="cost-grid">
+      <div class="cost-card"><h4>Today</h4><div class="cost-stat" id="c-today">…</div></div>
+      <div class="cost-card"><h4>Last 7 days</h4><div class="cost-stat" id="c-week">…</div></div>
+      <div class="cost-card"><h4>Last 30 days</h4><div class="cost-stat" id="c-month">…</div></div>
+      <div class="cost-card"><h4>Active burn</h4><div class="cost-stat" id="c-burn">…</div></div>
+    </div>
+
+    <h3 style="margin-top:18px;">Daily heatmap (30d)</h3>
+    <div class="cost-heatmap" id="c-heat"></div>
+
+    <h3 style="margin-top:18px;">By source (7d)</h3>
+    <div id="c-source"></div>
+
+    <h3 style="margin-top:18px;">By project (7d)</h3>
+    <table class="admin-table"><thead><tr><th>Project</th><th>Total</th><th>Bridge</th><th>Summarizer</th><th>Intent</th><th>Other</th></tr></thead><tbody id="c-proj-body"></tbody></table>
+
+    <h3 style="margin-top:18px;">Top sessions (30d)</h3>
+    <table class="admin-table"><thead><tr><th>Session</th><th>Total</th></tr></thead><tbody id="c-sess-body"></tbody></table>
+
+    <h3 style="margin-top:18px;">Caps</h3>
+    <table class="admin-table"><thead><tr><th>Scope</th><th>Cap (USD)</th><th>Behavior</th><th>Enabled</th><th></th></tr></thead><tbody id="c-caps-body"></tbody></table>
+  `;
+
+  try {
+    const [summary, timeline, bySource, byProj, caps] = await Promise.all([
+      api.get("/cost/summary"),
+      api.get("/cost/timeline", { days: 30 }),
+      api.get("/cost/by-source", { days: 7 }),
+      api.get("/cost/by-project", { days: 7 }),
+      api.get("/cost/caps"),
+    ]);
+    const live = await api.get("/cost/live").catch(() => ({}));
+
+    document.getElementById("c-today").textContent = "$" + (summary.today || 0).toFixed(2);
+    document.getElementById("c-week").textContent  = "$" + (summary.week  || 0).toFixed(2);
+    document.getElementById("c-month").textContent = "$" + (summary.month || 0).toFixed(2);
+    document.getElementById("c-burn").textContent  = "$" + ((live.active_sessions_burn_rate) || 0).toFixed(2);
+
+    // Heatmap — bin each day's total into 5 buckets relative to max.
+    const days = (timeline.timeline || []);
+    const max = Math.max(0.0001, ...days.map((d) => d.total || 0));
+    document.getElementById("c-heat").innerHTML = days.map((d) => {
+      const ratio = (d.total || 0) / max;
+      const bin = ratio === 0 ? 0 : ratio < 0.25 ? 1 : ratio < 0.5 ? 2 : ratio < 0.75 ? 3 : 4;
+      return `<div class="cell" data-bin="${bin}" title="${d.date}: $${(d.total||0).toFixed(4)}"></div>`;
+    }).join("");
+
+    // By source — horizontal bars.
+    const src = bySource.sources || {};
+    const srcMax = Math.max(0.0001, ...Object.values(src).map((v) => Number(v) || 0));
+    document.getElementById("c-source").innerHTML = Object.entries(src)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => {
+        const w = Math.round((Number(v) / srcMax) * 100);
+        return `<div class="cost-bar"><span style="width:90px">${escape(k)}</span>` +
+               `<div class="fill" style="width:${w}%"></div>` +
+               `<span>$${Number(v).toFixed(4)}</span></div>`;
+      }).join("");
+
+    document.getElementById("c-proj-body").innerHTML = (byProj.projects || []).map((p) => `
+      <tr>
+        <td>${escape(p.project_slug)}</td>
+        <td>$${(p.total || 0).toFixed(4)}</td>
+        <td>$${(p.bridge || 0).toFixed(4)}</td>
+        <td>$${(p.summarizer || 0).toFixed(4)}</td>
+        <td>$${(p.intent || 0).toFixed(4)}</td>
+        <td>$${(p.other || 0).toFixed(4)}</td>
+      </tr>`).join("");
+
+    document.getElementById("c-sess-body").innerHTML = (summary.top_sessions || []).map((s) => `
+      <tr><td><code>${escape(s.session_id)}</code></td><td>$${(s.total_usd || 0).toFixed(4)}</td></tr>
+    `).join("");
+
+    document.getElementById("c-caps-body").innerHTML = (caps.caps || []).map((c) => `
+      <tr>
+        <td><code>${escape(c.scope)}</code></td>
+        <td>$<input type="number" step="0.01" value="${c.cap_usd}" data-cap-field="cap_usd" data-scope="${escape(c.scope)}" style="width:90px"></td>
+        <td>
+          <select data-cap-field="behavior" data-scope="${escape(c.scope)}">
+            ${["warn","haiku_force","hard_stop"].map(b => `<option ${b===c.behavior?"selected":""}>${b}</option>`).join("")}
+          </select>
+        </td>
+        <td><input type="checkbox" ${c.enabled?"checked":""} data-cap-field="enabled" data-scope="${escape(c.scope)}"></td>
+        <td><button class="btn ghost" data-cap-save="${escape(c.scope)}">Save</button></td>
+      </tr>`).join("");
+
+    body.querySelectorAll("[data-cap-save]").forEach((btn) => {
+      btn.onclick = async () => {
+        const scope = btn.dataset.capSave;
+        const fields = body.querySelectorAll(`[data-scope="${scope}"]`);
+        const patch = {};
+        fields.forEach((f) => {
+          const k = f.dataset.capField;
+          patch[k] = f.type === "checkbox" ? f.checked
+                   : f.type === "number"   ? Number(f.value) : f.value;
+        });
+        try {
+          await api.patch(`/cost/caps/${encodeURIComponent(scope)}`, patch);
+          toast.success("Cap saved");
+        } catch (e) {
+          toast.error(`Save failed: ${e.message}`);
+        }
+      };
+    });
+  } catch (e) {
+    body.innerHTML += `<p class="muted">Failed: ${escape(e.message)}</p>`;
   }
 }
 

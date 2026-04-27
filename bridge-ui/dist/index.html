@@ -20,6 +20,11 @@
       <button class="tab" data-tab="bridge" role="tab" aria-selected="false">Bridge</button>
     </nav>
     <div class="topbar-right">
+      <span class="cost-pill" id="cost-pill" title="Empire spend today (click for breakdown)">
+        <span class="cost-dot"></span>
+        <span>$<span id="today-spend">0.00</span> today</span>
+        <span id="bridge-turn-cost" class="hidden"> · turn $<span id="turn-amount">0.000</span></span>
+      </span>
       <span class="health-pill" id="health-pill" title="Click for details">
         <span class="health-dot" data-status="unknown"></span>
         <span id="health-label">checking…</span>
@@ -131,6 +136,7 @@
           <button class="admin-nav-item" data-admin-panel="actions">Action queue</button>
           <button class="admin-nav-item" data-admin-panel="handoffs">Handoffs</button>
           <button class="admin-nav-item" data-admin-panel="stats">Stats</button>
+          <button class="admin-nav-item" data-admin-panel="cost">Cost</button>
         </aside>
         <section class="admin-panel" id="admin-panel-body">
           <p class="muted">Pick a panel.</p>

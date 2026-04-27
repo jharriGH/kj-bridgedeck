@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 from uuid import UUID, uuid4
@@ -19,7 +20,14 @@ from anthropic import AsyncAnthropic
 
 from shared.contracts import BridgeChatRequest, BridgeSources
 
-from .claude_stream import SSEEvent, stream_claude_response
+from .claude_stream import (
+    COST_TABLE,
+    DEFAULT_RATES,
+    MAX_OUTPUT_TOKENS_DEFAULT,
+    MAX_OUTPUT_TOKENS_HARD_CAP,
+    SSEEvent,
+    stream_claude_response,
+)
 from .context import ContextGatherer
 from .directives import parse_directives, strip_directives
 from .intent import IntentRouter
@@ -31,14 +39,61 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_HAIKU = "claude-haiku-4-5-20251001"
 DEFAULT_SONNET = "claude-sonnet-4-5"
-HAIKU_INTENTS = {"status_query", "fact_recall", "cost_query", "save_memory", "general"}
-SONNET_INTENTS = {"next_action", "session_history", "empire_summary", "launch_session"}
+
+# Intent routing. FAST_INTENTS always go to Haiku unless force_model="sonnet".
+# Reasoning intents need Sonnet's tool-use + multi-hop synthesis.
+FAST_INTENTS = {"status_query", "fact_recall", "cost_query", "session_history"}
+HAIKU_INTENTS = FAST_INTENTS | {"save_memory", "general"}
+SONNET_INTENTS = {"next_action", "empire_summary", "launch_session"}
 
 BRIDGE_CONVERSATIONS_TABLE = "kjcodedeck.bridge_conversations"
 BRIDGE_TURNS_TABLE = "kjcodedeck.bridge_turns"
 ACTION_QUEUE_TABLE = "kjcodedeck.action_queue"
 HISTORY_LOG_TABLE = "kjcodedeck.history_log"
+COST_LOG_TABLE = "kjcodedeck.cost_log"
+COST_CAPS_TABLE = "kjcodedeck.cost_caps"
 AUTO_SAVE_TURN_THRESHOLD = 6
+
+# GUARDRAIL 2 — token budget enforcement.
+MAX_CONTEXT_TOKENS = 120_000
+MAX_HISTORY_TURNS = 6
+LOW_CONTEXT_THRESHOLD = 3  # F9 — empty-context warning
+
+
+def estimate_tokens(text: str) -> int:
+    """Rough char-to-token estimate. 1 token ~ 4 chars for English."""
+    if not text:
+        return 0
+    return len(text) // 4
+
+
+def _sources_token_estimate(sources: Any) -> int:
+    if sources is None:
+        return 0
+    if hasattr(sources, "model_dump_json"):
+        return estimate_tokens(sources.model_dump_json())
+    try:
+        return estimate_tokens(json.dumps(sources, default=str))
+    except Exception:
+        return estimate_tokens(str(sources))
+
+
+def _trim_sources(sources: BridgeSources) -> BridgeSources:
+    """Hard-trim a BridgeSources bundle when context is over budget."""
+    sources.handoffs = sources.handoffs[:10]
+    sources.memories = sources.memories[:5]
+    sources.cards = sources.cards[:3]
+    return sources
+
+
+def _estimate_turn_cost(
+    model: str, tokens_in_estimate: int, tokens_out_estimate: int
+) -> float:
+    rates = COST_TABLE.get(model, DEFAULT_RATES)
+    return (
+        tokens_in_estimate * rates["in"] / 1_000_000
+        + tokens_out_estimate * rates["out"] / 1_000_000
+    )
 
 
 class BridgeChatService:
@@ -67,21 +122,58 @@ class BridgeChatService:
     # ------------------------------------------------------------------
 
     async def chat(self, request: BridgeChatRequest) -> AsyncGenerator[SSEEvent, None]:
+        turn_started = time.time()
+
         # 1. Voice input → transcribe
         if request.voice_input and request.audio_base64:
+            voice_started = time.time()
             transcript = await self.voice.transcribe(request.audio_base64)
             request.message = transcript
-            yield SSEEvent(
-                event="transcript", data=json.dumps({"text": transcript})
+            yield SSEEvent(event="transcript", data=json.dumps({"text": transcript}))
+            await self._log_cost(
+                source_system="whisper",
+                model="whisper-1",
+                tokens_in=0,
+                tokens_out=0,
+                cost_usd=0.006 * max(1, len(request.audio_base64) // 200_000),
+                conversation_id=str(request.conversation_id) if request.conversation_id else None,
+                duration_ms=int((time.time() - voice_started) * 1000),
             )
 
-        # 2. Load conversation state
+        # 2. Load + (F7) compress conversation history
         conv_id = request.conversation_id or uuid4()
         conv_history = await self._load_history(conv_id)
+        if len(conv_history) > MAX_HISTORY_TURNS * 2:  # *2 because user+assistant per turn
+            digest = await self._compress_history(conv_id, conv_history)
+            if digest:
+                yield SSEEvent(
+                    event="history_compressed",
+                    data=json.dumps({"compressed_into": digest[:120] + "…"}),
+                )
+                conv_history = [
+                    {"role": "user", "content": f"[earlier conversation digest]\n{digest}"},
+                    *conv_history[-MAX_HISTORY_TURNS * 2 :],
+                ]
 
         # 3. Classify intent
+        intent_started = time.time()
         intent_data = await self.intent_router.classify(request.message)
         yield SSEEvent(event="intent", data=json.dumps(intent_data))
+        await self._log_cost(
+            source_system="intent",
+            model=getattr(self.intent_router, "model", None),
+            tokens_in=estimate_tokens(request.message),
+            tokens_out=80,
+            cost_usd=_estimate_turn_cost(
+                getattr(self.intent_router, "model", "") or DEFAULT_HAIKU,
+                estimate_tokens(request.message),
+                80,
+            ),
+            intent=intent_data.get("intent"),
+            project_slug=intent_data.get("project_slug"),
+            conversation_id=str(conv_id),
+            duration_ms=int((time.time() - intent_started) * 1000),
+        )
 
         # 4. Gather context
         try:
@@ -96,14 +188,112 @@ class BridgeChatService:
             sources = BridgeSources()
         yield SSEEvent(event="sources", data=sources.model_dump_json())
 
-        # 5. Choose model
+        # 5. Choose model (F5: fast intents always Haiku unless forced Sonnet)
         model = await self._choose_model(intent_data["intent"], request.force_model)
+
+        # 6. (F11) Cap enforcement — empire_daily / empire_weekly / project_daily.
+        caps = await self._load_caps()
+        cap_violations: list[dict] = []
+        for cap in caps:
+            scope = cap.get("scope", "")
+            spent = await self._spend_in_scope(scope, intent_data.get("project_slug"))
+            if spent is None or float(cap.get("cap_usd") or 0) <= 0:
+                continue
+            if spent < float(cap["cap_usd"]):
+                continue
+            behavior = cap.get("behavior") or "warn"
+            cap_violations.append(
+                {"scope": scope, "spent": spent, "cap": float(cap["cap_usd"]), "behavior": behavior}
+            )
+            if behavior == "haiku_force":
+                model = await self._setting("bridge", "haiku_model", DEFAULT_HAIKU)
+            elif behavior == "hard_stop":
+                yield SSEEvent(
+                    event="error",
+                    data=json.dumps({
+                        "kind": "budget_hard_stop",
+                        "message": f"Cap '{scope}' hit: ${spent:.2f} ≥ ${cap['cap_usd']}.",
+                        "scope": scope,
+                    }),
+                )
+                return
+        for v in cap_violations:
+            yield SSEEvent(event="budget_warning", data=json.dumps(v))
+
         yield SSEEvent(
             event="model_selected",
             data=json.dumps({"model": model, "reason": intent_data["intent"]}),
         )
 
-        # 6. Build system prompt
+        # 7. (F9) Empty-context detection
+        total_items = (
+            len(sources.handoffs) + len(sources.memories)
+            + len(sources.projects) + len(sources.cards)
+        )
+        if (
+            intent_data.get("intent") not in ("general", "save_memory")
+            and total_items < LOW_CONTEXT_THRESHOLD
+            and not request.confirm_low_context
+        ):
+            est_in = estimate_tokens(request.message) + 500
+            est_out = request.max_tokens or MAX_OUTPUT_TOKENS_DEFAULT
+            est_cost = _estimate_turn_cost(model, est_in, est_out)
+            yield SSEEvent(
+                event="low_context_warning",
+                data=json.dumps({
+                    "intent": intent_data["intent"],
+                    "items_found": total_items,
+                    "estimated_cost": round(est_cost, 4),
+                    "suggestion": "Run /projects/sync first or query may return 'no data loaded'",
+                }),
+            )
+
+        # 8. (G2) Token budget — trim sources + history if over budget.
+        ctx_tokens = _sources_token_estimate(sources)
+        history_text = "\n".join(
+            (m.get("content") or "") if isinstance(m, dict) else "" for m in conv_history
+        )
+        history_tokens = estimate_tokens(history_text)
+        message_tokens = estimate_tokens(request.message)
+        total_in = ctx_tokens + history_tokens + message_tokens
+        if total_in > MAX_CONTEXT_TOKENS:
+            sources = _trim_sources(sources)
+            ctx_tokens = _sources_token_estimate(sources)
+            total_in = ctx_tokens + history_tokens + message_tokens
+            yield SSEEvent(
+                event="context_truncated",
+                data=json.dumps({
+                    "reason": "over_token_budget",
+                    "limit": MAX_CONTEXT_TOKENS,
+                    "after_trim_tokens": total_in,
+                }),
+            )
+        if total_in > MAX_CONTEXT_TOKENS:
+            # Hard truncate the sources JSON.
+            keep = MAX_CONTEXT_TOKENS - history_tokens - message_tokens - 1000
+            payload = sources.model_dump()
+            blob = json.dumps(payload, default=str)
+            sources = BridgeSources(
+                projects=[{"_truncated_context": blob[: max(2000, keep * 4)]}]
+            )
+
+        # 9. (G4) Per-turn cost ceiling — pre-flight check.
+        per_turn_cap = await self._per_turn_cap()
+        max_out = min(request.max_tokens or MAX_OUTPUT_TOKENS_DEFAULT, MAX_OUTPUT_TOKENS_HARD_CAP)
+        est_cost = _estimate_turn_cost(model, total_in, max_out)
+        if per_turn_cap > 0 and est_cost > per_turn_cap:
+            yield SSEEvent(
+                event="error",
+                data=json.dumps({
+                    "kind": "per_turn_cap_exceeded",
+                    "estimated_cost": round(est_cost, 4),
+                    "cap_usd": per_turn_cap,
+                    "message": f"Turn would cost ~${est_cost:.4f}, cap is ${per_turn_cap}. Aborting.",
+                }),
+            )
+            return
+
+        # 10. Build system prompt
         system_prompt = build_system_prompt(
             sources=sources,
             conversation_history=conv_history,
@@ -111,19 +301,21 @@ class BridgeChatService:
             today_spend=await self._today_spend(),
         )
 
-        # 7. Stream Claude response
+        # 11. Stream Claude response
+        stream_started = time.time()
         messages = [*conv_history, {"role": "user", "content": request.message}]
         full_text = ""
         final_meta: dict[str, Any] = {}
         async for event in stream_claude_response(
-            self.anthropic, model, system_prompt, messages
+            self.anthropic, model, system_prompt, messages, max_tokens=max_out
         ):
             if event.event == "done":
                 final_meta = json.loads(event.data)
                 full_text = final_meta.get("full_text", "")
             yield event
+        stream_duration_ms = int((time.time() - stream_started) * 1000)
 
-        # 8. Parse + queue directives
+        # 12. Parse + queue directives
         directives = parse_directives(full_text)
         if directives:
             for directive in directives:
@@ -133,10 +325,10 @@ class BridgeChatService:
                 data=json.dumps([d.model_dump() for d in directives]),
             )
 
-        # 9. Clean display text
+        # 13. Clean display text
         display_text = strip_directives(full_text)
 
-        # 10. Persist turn
+        # 14. Persist turn
         await self._save_turn(
             conversation_id=conv_id,
             user_message=request.message,
@@ -151,6 +343,20 @@ class BridgeChatService:
             voice_input=request.voice_input,
         )
 
+        # 15. (F10) Cost-log the bridge turn.
+        await self._log_cost(
+            source_system="bridge",
+            project_slug=intent_data.get("project_slug"),
+            conversation_id=str(conv_id),
+            turn_id=str(uuid4()),
+            model=model,
+            tokens_in=int(final_meta.get("tokens_in") or 0),
+            tokens_out=int(final_meta.get("tokens_out") or 0),
+            cost_usd=float(final_meta.get("cost") or 0.0),
+            intent=intent_data.get("intent"),
+            duration_ms=stream_duration_ms or int((time.time() - turn_started) * 1000),
+        )
+
         # 11. Optional Brain auto-save
         if await self._setting("bridge", "auto_save_conversations", False):
             await self._maybe_save_to_brain(conv_id)
@@ -160,6 +366,13 @@ class BridgeChatService:
     # ------------------------------------------------------------------
 
     async def _choose_model(self, intent: str, force: str | None) -> str:
+        # FEATURE 5 — fast intents always go to Haiku unless the caller
+        # explicitly forces Sonnet. Status / fact-recall / cost / history
+        # don't need reasoning capacity and the price gap is ~4x.
+        if intent in FAST_INTENTS:
+            if force and force.lower().startswith("sonnet"):
+                return await self._setting("bridge", "sonnet_model", DEFAULT_SONNET)
+            return await self._setting("bridge", "haiku_model", DEFAULT_HAIKU)
         if force:
             return force
         mode = await self._setting("bridge", "default_model", "auto")
@@ -173,6 +386,153 @@ class BridgeChatService:
         if intent in SONNET_INTENTS:
             return await self._setting("bridge", "sonnet_model", DEFAULT_SONNET)
         return await self._setting("bridge", "haiku_model", DEFAULT_HAIKU)
+
+    # ------------------------------------------------------------------
+    # Cost intel — logging, cap loading, scope-spend, per-turn cap, compress
+    # ------------------------------------------------------------------
+
+    async def _log_cost(
+        self,
+        *,
+        source_system: str,
+        cost_usd: float,
+        model: str | None = None,
+        project_slug: str | None = None,
+        session_id: str | None = None,
+        conversation_id: str | None = None,
+        turn_id: str | None = None,
+        tokens_in: int = 0,
+        tokens_out: int = 0,
+        intent: str | None = None,
+        duration_ms: int | None = None,
+    ) -> None:
+        payload = {
+            "source_system": source_system,
+            "model": model,
+            "project_slug": project_slug,
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "turn_id": turn_id,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "cost_usd": float(cost_usd or 0.0),
+            "intent": intent,
+            "duration_ms": duration_ms,
+        }
+        await self._supabase_run(
+            lambda: self.supabase.table(COST_LOG_TABLE).insert(payload).execute()
+        )
+
+    async def _load_caps(self) -> list[dict]:
+        rows = await self._supabase_run(
+            lambda: self.supabase.table(COST_CAPS_TABLE)
+            .select("*").eq("enabled", True).execute()
+        )
+        return getattr(rows, "data", None) or []
+
+    async def _per_turn_cap(self) -> float:
+        rows = await self._supabase_run(
+            lambda: self.supabase.table(COST_CAPS_TABLE)
+            .select("cap_usd,enabled").eq("scope", "bridge_per_turn").limit(1).execute()
+        )
+        data = getattr(rows, "data", None) or []
+        if not data or not data[0].get("enabled"):
+            return 0.0
+        try:
+            return float(data[0].get("cap_usd") or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    async def _spend_in_scope(self, scope: str, project_slug: str | None) -> float | None:
+        """Aggregate cost_log spend in the named scope. Returns 0.0 if empty."""
+        now = datetime.now(timezone.utc)
+        if scope == "empire_daily":
+            since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            project_filter = None
+        elif scope == "empire_weekly":
+            since = now - timedelta(days=7)
+            project_filter = None
+        elif scope.startswith("project:") and scope.endswith("_daily"):
+            since = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            project_filter = scope[len("project:") : -len("_daily")]
+        elif scope == "bridge_per_turn":
+            return None  # not a running aggregate
+        else:
+            return None
+
+        def _do():
+            q = (
+                self.supabase.table(COST_LOG_TABLE)
+                .select("cost_usd,project_slug")
+                .gte("created_at", since.isoformat())
+            )
+            if project_filter:
+                q = q.eq("project_slug", project_filter)
+            return q.execute()
+
+        rows = await self._supabase_run(_do)
+        data = getattr(rows, "data", None) or []
+        return float(sum(float(r.get("cost_usd") or 0) for r in data))
+
+    async def _compress_history(self, conv_id: UUID, history: list[dict]) -> str | None:
+        """(F7) Summarize older turns via Haiku. Caches the digest on the
+        bridge_conversations row so repeat calls don't re-summarize."""
+        existing = await self._supabase_run(
+            lambda: self.supabase.table(BRIDGE_CONVERSATIONS_TABLE)
+            .select("title").eq("id", str(conv_id)).limit(1).execute()
+        )
+        rows = getattr(existing, "data", None) or []
+        if rows and rows[0].get("title", "").startswith("[digest]"):
+            return rows[0]["title"][len("[digest]") :].strip()
+
+        cutoff = max(0, len(history) - MAX_HISTORY_TURNS * 2)
+        older = history[:cutoff]
+        if not older:
+            return None
+        snippet = "\n".join(
+            f"[{m.get('role','user')}] {(m.get('content') or '')[:400]}"
+            for m in older
+        )[:6000]
+        try:
+            haiku_started = time.time()
+            resp = await self.anthropic.messages.create(
+                model=DEFAULT_HAIKU,
+                max_tokens=350,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            "Summarize this Bridge chat history in 4 bullets. "
+                            "Keep concrete facts, decisions, and project slugs. "
+                            "Drop pleasantries.\n\n" + snippet
+                        ),
+                    }
+                ],
+            )
+            digest = resp.content[0].text.strip()
+            await self._log_cost(
+                source_system="bridge_compress",
+                model=DEFAULT_HAIKU,
+                conversation_id=str(conv_id),
+                tokens_in=getattr(resp.usage, "input_tokens", 0),
+                tokens_out=getattr(resp.usage, "output_tokens", 0),
+                cost_usd=_estimate_turn_cost(
+                    DEFAULT_HAIKU,
+                    getattr(resp.usage, "input_tokens", 0),
+                    getattr(resp.usage, "output_tokens", 0),
+                ),
+                duration_ms=int((time.time() - haiku_started) * 1000),
+            )
+            await self._supabase_run(
+                lambda: self.supabase.table(BRIDGE_CONVERSATIONS_TABLE)
+                .update({"title": "[digest] " + digest[:1000]})
+                .eq("id", str(conv_id))
+                .execute()
+            )
+            return digest
+        except Exception as exc:
+            logger.debug("compress_history failed: %s", exc)
+            return None
 
     async def _setting(self, namespace: str, key: str, default: Any = None) -> Any:
         if self.settings_cache is None:

@@ -37,6 +37,26 @@ function setMeta(text) {
   document.getElementById("bridge-meta").textContent = text || "";
 }
 
+function renderLowContextConfirm(turn, data, originalMessage) {
+  const div = document.createElement("div");
+  div.className = "bridge-confirm";
+  div.innerHTML = `
+    <div>I have minimal context for this query (${data.items_found || 0} items).
+      Estimated cost <b>$${(data.estimated_cost || 0).toFixed(4)}</b>.</div>
+    <div class="muted small">${data.suggestion || ""}</div>
+    <div class="actions">
+      <button class="btn primary" data-confirm="yes">Proceed anyway</button>
+      <button class="btn ghost" data-confirm="no">Cancel</button>
+    </div>
+  `;
+  turn.appendChild(div);
+  div.querySelector('[data-confirm="yes"]').onclick = () => {
+    div.remove();
+    sendMessage(originalMessage, false, null, true);
+  };
+  div.querySelector('[data-confirm="no"]').onclick = () => div.remove();
+}
+
 async function loadHistory() {
   try {
     const r = await api.get("/bridge/conversations", { limit: 1 });
@@ -58,7 +78,7 @@ async function loadHistory() {
   }
 }
 
-async function sendMessage(message, voice_input = false, audio_base64 = null) {
+async function sendMessage(message, voice_input = false, audio_base64 = null, confirm_low_context = false) {
   if (streaming) {
     toast.error("Already streaming a response.");
     return;
@@ -79,6 +99,7 @@ async function sendMessage(message, voice_input = false, audio_base64 = null) {
         conversation_id: conversationId || undefined,
         voice_input,
         audio_base64: audio_base64 || undefined,
+        confirm_low_context,
         stream: true,
       },
       ({ event, data }) => {
@@ -118,9 +139,30 @@ async function sendMessage(message, voice_input = false, audio_base64 = null) {
               `intent: ${intentLabel} · model: ${modelLabel} · ` +
               `${data.tokens_in || 0} → ${data.tokens_out || 0} tok · $${cost}`
             );
+            const meta = document.createElement("div");
+            meta.className = "turn-meta";
+            meta.textContent =
+              `[${modelLabel || "?"}] · ${data.tokens_in || 0} in / ${data.tokens_out || 0} out · ` +
+              `$${cost} · ${data.duration_ms ? data.duration_ms + "ms" : ""}`;
+            turn.appendChild(meta);
+            break;
+          case "low_context_warning":
+            renderLowContextConfirm(turn, data, message);
+            break;
+          case "budget_warning":
+            toast.error(`Budget cap '${data.scope}' hit: $${(data.spent || 0).toFixed(2)} of $${data.cap}.`);
+            break;
+          case "context_truncated":
+            const w = document.createElement("div");
+            w.className = "turn-meta warn";
+            w.textContent = `⚠ context trimmed to ${data.after_trim_tokens || data.limit} tokens`;
+            turn.appendChild(w);
+            break;
+          case "history_compressed":
+            setMeta(`(history compressed) · ${intentLabel}`);
             break;
           case "error":
-            toast.error(`Stream error: ${data.message || data}`);
+            toast.error(`Stream error: ${(data && data.message) || data}`);
             break;
         }
       }

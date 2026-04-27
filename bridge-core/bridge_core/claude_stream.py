@@ -41,12 +41,16 @@ class SSEEvent:
         return f"event: {self.event}\ndata: {self.data}\n\n"
 
 
+MAX_OUTPUT_TOKENS_DEFAULT = 2048
+MAX_OUTPUT_TOKENS_HARD_CAP = 8192
+
+
 async def stream_claude_response(
     client: AsyncAnthropic,
     model: str,
     system_prompt: str,
     messages: list[dict],
-    max_tokens: int = 2048,
+    max_tokens: int = MAX_OUTPUT_TOKENS_DEFAULT,
     temperature: float = 0.7,
 ) -> AsyncGenerator[SSEEvent, None]:
     """Async generator yielding `SSEEvent`s for each chunk plus a final `done`.

@@ -94,6 +94,8 @@ class BridgeChatRequest(BaseModel):
     voice_input: bool = False
     audio_base64: Optional[str] = None
     force_model: Optional[str] = None
+    max_tokens: Optional[int] = Field(default=None, ge=64, le=8192)
+    confirm_low_context: bool = False
 
 
 class ActionDirective(BaseModel):

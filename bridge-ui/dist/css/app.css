@@ -98,6 +98,63 @@ kbd {
 .health-dot[data-status="degraded"]{ background: var(--warn); }
 .health-dot[data-status="down"]    { background: var(--bad); }
 
+/* Cost pill */
+.cost-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px; border-radius: 999px;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12px; cursor: pointer;
+}
+.cost-pill .cost-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: var(--good);
+}
+.cost-pill[data-state="warn"] .cost-dot { background: var(--warn); }
+.cost-pill[data-state="over"] .cost-dot { background: var(--bad); }
+.cost-pill[data-state="warn"]            { border-color: var(--warn); color: var(--warn); }
+.cost-pill[data-state="over"]            { border-color: var(--bad); color: var(--bad); }
+
+/* Per-turn meta below an assistant bubble */
+.turn-meta {
+  margin-top: 6px;
+  font-family: var(--mono); font-size: 10.5px;
+  color: var(--text-dim);
+  letter-spacing: 0.3px;
+}
+.turn-meta .warn { color: var(--warn); }
+
+/* Inline confirm card for low_context_warning */
+.bridge-confirm {
+  margin: 12px 0; padding: 12px;
+  border: 1px solid var(--warn);
+  background: rgba(255, 184, 77, 0.08);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
+.bridge-confirm .actions { margin-top: 8px; display: flex; gap: 6px; }
+
+/* Cost admin panel */
+.cost-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.cost-card {
+  background: var(--bg-elev-2); padding: 12px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+.cost-card h4 { margin: 0 0 8px; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+.cost-stat { font-family: var(--mono); font-size: 22px; }
+.cost-heatmap {
+  display: grid; grid-template-columns: repeat(15, 1fr);
+  gap: 2px; padding: 4px 0;
+}
+.cost-heatmap .cell {
+  aspect-ratio: 1; border-radius: 2px;
+  background: var(--bg-elev); border: 1px solid var(--line);
+}
+.cost-heatmap .cell[data-bin="1"] { background: rgba(0, 229, 255, 0.20); border-color: rgba(0, 229, 255, 0.30); }
+.cost-heatmap .cell[data-bin="2"] { background: rgba(0, 229, 255, 0.40); border-color: rgba(0, 229, 255, 0.50); }
+.cost-heatmap .cell[data-bin="3"] { background: rgba(0, 229, 255, 0.65); border-color: rgba(0, 229, 255, 0.75); }
+.cost-heatmap .cell[data-bin="4"] { background: rgba(0, 229, 255, 0.90); border-color: var(--accent); }
+.cost-bar { display: flex; gap: 6px; align-items: center; font-family: var(--mono); font-size: 12px; }
+.cost-bar .fill { background: var(--accent); height: 12px; border-radius: 2px; }
+
 .icon-btn {
   background: transparent; border: 1px solid var(--line);
   color: var(--text); width: 30px; height: 30px;

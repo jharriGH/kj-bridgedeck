@@ -22,6 +22,7 @@ from routes import (
     action_queue,
     auto_approve,
     bridge,
+    cost,
     handoffs,
     health,
     history,
@@ -187,3 +188,4 @@ app.include_router(action_queue.router, prefix="/actions", tags=["actions"])
 app.include_router(projects.router, prefix="/projects", tags=["projects"])
 app.include_router(bridge.router, prefix="/bridge", tags=["bridge"])
 app.include_router(stats.router, prefix="/stats", tags=["stats"])
+app.include_router(cost.router, prefix="/cost", tags=["cost"])

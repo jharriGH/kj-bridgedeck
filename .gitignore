@@ -43,6 +43,13 @@ dist/
 !bridge-ui/dist/
 !bridge-ui/dist/**
 
+# Wrangler local cache — never commit.
+bridge-ui/.wrangler/
+.wrangler/
+
+# Local Claude Code state.
+.claude/
+
 # OS
 .DS_Store
 Thumbs.db

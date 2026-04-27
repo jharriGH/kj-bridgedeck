@@ -79,6 +79,37 @@ document.getElementById("health-pill").addEventListener("click", () => {
 pollHealth();
 setInterval(pollHealth, 30_000);
 
+// --- Cost pill (poll /cost/live every 5s) --------------------------------
+const COST_WARN = 0.8; // 80% of empire_daily cap
+const COST_OVER = 1.0;
+async function pollCostLive() {
+  try {
+    const live = await api.get("/cost/live");
+    document.getElementById("today-spend").textContent = (live.today || 0).toFixed(2);
+
+    const caps = await api.get("/cost/caps").catch(() => ({ caps: [] }));
+    const empireDaily = (caps.caps || []).find((c) => c.scope === "empire_daily");
+    const cap = empireDaily ? Number(empireDaily.cap_usd) : 0;
+    const pill = document.getElementById("cost-pill");
+    if (cap > 0) {
+      const ratio = (live.today || 0) / cap;
+      pill.dataset.state = ratio >= COST_OVER ? "over" : ratio >= COST_WARN ? "warn" : "ok";
+      pill.title = `$${(live.today || 0).toFixed(2)} of $${cap.toFixed(2)} empire_daily cap`;
+    }
+  } catch (e) {
+    // silent — cost is non-critical
+  }
+}
+document.getElementById("cost-pill").addEventListener("click", () => {
+  document.getElementById("open-admin").click();
+  setTimeout(() => {
+    const tab = document.querySelector('.admin-nav-item[data-admin-panel="cost"]');
+    if (tab) tab.click();
+  }, 50);
+});
+pollCostLive();
+setInterval(pollCostLive, 5000);
+
 // --- Mount feature modules -----------------------------------------------
 monitor.init();
 terminal.init();
