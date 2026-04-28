@@ -18,6 +18,7 @@
       <button class="tab" data-tab="monitor" role="tab" aria-selected="true">Monitor</button>
       <button class="tab" data-tab="terminal" role="tab" aria-selected="false">Terminal</button>
       <button class="tab" data-tab="bridge" role="tab" aria-selected="false">Bridge</button>
+      <button class="tab" data-tab="cost" role="tab" aria-selected="false">💰 Cost</button>
     </nav>
     <div class="topbar-right">
       <span class="cost-pill" id="cost-pill" title="Empire spend today (click for breakdown)">
@@ -123,6 +124,20 @@
           <button class="btn primary" id="bridge-send">Send</button>
         </footer>
         <div class="bridge-meta" id="bridge-meta"></div>
+      </div>
+    </section>
+
+    <!-- COST TAB --------------------------------------------------------- -->
+    <section class="tab-panel" id="panel-cost" data-active="false">
+      <div class="panel-toolbar">
+        <h2>Cost Intelligence</h2>
+        <div class="toolbar-actions">
+          <span class="muted" id="cost-tab-meta">—</span>
+          <button class="btn ghost" id="cost-tab-refresh">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="cost-tab-body" id="cost-tab-body">
+        <div class="placeholder"><p>Loading cost dashboard…</p></div>
       </div>
     </section>
   </main>

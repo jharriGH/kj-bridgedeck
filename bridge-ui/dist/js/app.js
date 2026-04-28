@@ -6,6 +6,7 @@ import * as terminal from "./terminal.js";
 import * as bridge from "./bridge.js";
 import * as admin from "./admin.js";
 import * as history from "./history.js";
+import * as costTab from "./cost-tab.js";
 
 document.getElementById("version-tag").textContent = "v" + api.config.version;
 
@@ -153,3 +154,4 @@ terminal.init();
 bridge.init();
 admin.init();
 history.init();
+costTab.init();

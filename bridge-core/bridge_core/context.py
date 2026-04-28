@@ -5,9 +5,14 @@ don't blow token budget pulling everything on every turn.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import shutil
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -20,6 +25,7 @@ REQUEST_TIMEOUT = 15.0
 SESSION_HANDOFFS_TABLE = "kjcodedeck.session_handoffs"
 LIVE_SESSIONS_TABLE = "kjcodedeck.live_sessions"
 SESSION_ARCHIVE_TABLE = "kjcodedeck.session_archive"
+COST_LOG_TABLE = "kjcodedeck.cost_log"
 
 
 class _BrainCache:
@@ -126,13 +132,7 @@ class ContextGatherer:
         message: str,
         time_range_days: int | None,
     ) -> None:
-        memories = await self._safe_get(
-            client,
-            "/memory/search",
-            params={"q": message, "top_k": 5},
-        )
-        if isinstance(memories, list):
-            sources.memories = memories
+        sources.memories = await self._memory_search(client, message, top_k=5)
 
     async def _gather_session_history(
         self,
@@ -142,21 +142,11 @@ class ContextGatherer:
         message: str,
         time_range_days: int | None,
     ) -> None:
-        if project_slug:
-            rows = await self._supabase_select(
-                SESSION_HANDOFFS_TABLE,
-                order=("created_at", True),
-                limit=5,
-                eq={"project_slug": project_slug},
-            )
-            sources.handoffs = rows or []
-        memories = await self._safe_get(
-            client,
-            "/memory/search",
-            params={"q": message, "top_k": 3},
+        # Default window: 1 day for "history" queries unless caller said otherwise.
+        days = time_range_days or 1
+        await self._gather_multi_source_activity(
+            client, sources, project_slug, message, days
         )
-        if isinstance(memories, list):
-            sources.memories = memories
 
     async def _gather_empire_summary(
         self,
@@ -186,15 +176,12 @@ class ContextGatherer:
                 if p.get("id") and p.get("id") != "all"
             ]
             sources.projects = slim
+        # Multi-source activity aggregator. Default 7-day window for empire
+        # summaries; a project_slug=None means "the whole empire".
         days = time_range_days or 7
-        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        rows = await self._supabase_select(
-            SESSION_HANDOFFS_TABLE,
-            order=("created_at", True),
-            limit=20,
-            gte={"created_at": since},
+        await self._gather_multi_source_activity(
+            client, sources, project_slug, message, days
         )
-        sources.handoffs = rows or []
 
     async def _gather_cost_query(
         self,
@@ -322,6 +309,217 @@ class ContextGatherer:
         except Exception as exc:
             logger.warning("Supabase select %s failed: %s", table, exc)
             return None
+
+    # ------------------------------------------------------------------
+    # Multi-source aggregation — used by session_history and empire_summary.
+    # Pulls handoffs + cost_log + Brain cards + Brain memories + git log so
+    # the assistant has real signal even when handoffs are empty (which is
+    # the common case until the watcher is installed as a service).
+    # ------------------------------------------------------------------
+
+    async def _gather_multi_source_activity(
+        self,
+        client: httpx.AsyncClient,
+        sources: BridgeSources,
+        project_slug: str | None,
+        message: str,
+        days: int,
+    ) -> None:
+        since = datetime.now(timezone.utc) - timedelta(days=max(1, days))
+        # Run the five independent reads in parallel; fall back to empty on any
+        # individual failure so one slow source can't stall the whole turn.
+        handoffs_t = self._recent_handoffs(project_slug, since)
+        cost_t     = self._recent_cost_log(project_slug, since)
+        cards_t    = self._recent_cards(client, since)
+        memories_t = self._memory_search(client, message or "recent activity", top_k=5)
+        git_t      = self._recent_git_commits(since)
+        handoffs, cost_rows, cards, memories, git_rows = await asyncio.gather(
+            handoffs_t, cost_t, cards_t, memories_t, git_t,
+            return_exceptions=False,
+        )
+
+        # Existing typed slots
+        sources.handoffs = (handoffs or [])[:10]
+        sources.memories = (memories or [])[:5]
+        sources.cards    = (cards or [])[:5]
+
+        # The cost/git aggregates don't have first-class slots in
+        # BridgeSources, so we attach them to projects with a typed wrapper
+        # the prompt knows how to render.
+        activity_summary: dict[str, Any] = {
+            "_activity_summary": True,
+            "window_days": days,
+            "since": since.isoformat(),
+            "counts": {
+                "handoffs": len(sources.handoffs),
+                "cost_log_bridge": sum(1 for r in (cost_rows or []) if r.get("source_system") == "bridge"),
+                "cost_log_cc_session": sum(1 for r in (cost_rows or []) if r.get("source_system") == "cc_session"),
+                "cost_log_other": sum(1 for r in (cost_rows or []) if r.get("source_system") not in ("bridge","cc_session")),
+                "brain_cards": len(sources.cards),
+                "brain_memories": len(sources.memories),
+                "git_commits": len(git_rows or []),
+            },
+            "cost_log_recent": (cost_rows or [])[:25],
+            "git_recent": (git_rows or [])[:30],
+        }
+        # Prepend so the model sees the activity summary first; preserve any
+        # earlier projects load (e.g. empire_summary's slim project list).
+        sources.projects = [activity_summary, *sources.projects]
+
+    # ------------------------------------------------------------------
+    # Source readers
+    # ------------------------------------------------------------------
+
+    async def _recent_handoffs(
+        self, project_slug: str | None, since: datetime
+    ) -> list[dict]:
+        kw: dict[str, Any] = {
+            "order": ("created_at", True),
+            "limit": 10,
+            "gte": {"created_at": since.isoformat()},
+        }
+        if project_slug:
+            kw["eq"] = {"project_slug": project_slug}
+        rows = await self._supabase_select(SESSION_HANDOFFS_TABLE, **kw) or []
+        return [
+            {
+                "session_id": r.get("session_id"),
+                "project_slug": r.get("project_slug"),
+                "summary": (r.get("summary") or "")[:600],
+                "next_action": (r.get("next_action") or "")[:200],
+                "confidence": r.get("confidence"),
+                "created_at": r.get("created_at"),
+            }
+            for r in rows
+        ]
+
+    async def _recent_cost_log(
+        self, project_slug: str | None, since: datetime
+    ) -> list[dict]:
+        kw: dict[str, Any] = {
+            "order": ("created_at", True),
+            "limit": 50,
+            "gte": {"created_at": since.isoformat()},
+        }
+        if project_slug:
+            kw["eq"] = {"project_slug": project_slug}
+        rows = await self._supabase_select(COST_LOG_TABLE, **kw) or []
+        # Drop noisy fields; keep what helps the model summarize activity.
+        return [
+            {
+                "source_system": r.get("source_system"),
+                "project_slug": r.get("project_slug"),
+                "session_id": r.get("session_id"),
+                "intent": r.get("intent"),
+                "model": r.get("model"),
+                "cost_usd": r.get("cost_usd"),
+                "tokens_in": r.get("tokens_in"),
+                "tokens_out": r.get("tokens_out"),
+                "created_at": r.get("created_at"),
+            }
+            for r in rows
+        ]
+
+    async def _recent_cards(
+        self, client: httpx.AsyncClient, since: datetime
+    ) -> list[dict]:
+        """GET /cards. Brain v1.3.2 doesn't honor query filters — see
+        BridgeDeck enhancement card 1777340856363 — so we filter client-side
+        on `saved_at`."""
+        resp = await self._cached_get(client, "/cards", ttl_seconds=120)
+        cards = resp.get("cards") if isinstance(resp, dict) else (resp or [])
+        if not isinstance(cards, list):
+            return []
+        cutoff = since.isoformat()
+        recent = [
+            {
+                "id": c.get("id"),
+                "title": c.get("title"),
+                "project": c.get("project"),
+                "content_excerpt": (c.get("content") or "")[:600],
+                "saved_at": c.get("saved_at"),
+            }
+            for c in cards
+            if (c.get("saved_at") or "") >= cutoff
+        ]
+        # Newest first.
+        recent.sort(key=lambda c: c.get("saved_at") or "", reverse=True)
+        return recent
+
+    async def _memory_search(
+        self, client: httpx.AsyncClient, query: str, top_k: int = 5
+    ) -> list[dict]:
+        """Brain /memory/search returns {query, results, count}. The legacy
+        code expected a bare list, which silently dropped every result —
+        fixed here to extract `results`."""
+        resp = await self._safe_get(
+            client, "/memory/search", params={"q": query, "top_k": top_k},
+        )
+        if isinstance(resp, dict):
+            items = resp.get("results") or []
+        elif isinstance(resp, list):
+            items = resp
+        else:
+            return []
+        return [
+            {
+                "id": m.get("id"),
+                "memory": (m.get("memory") or "")[:600],
+                "score": m.get("score"),
+                "created_at": m.get("created_at"),
+                "metadata": m.get("metadata"),
+            }
+            for m in items[:top_k]
+        ]
+
+    async def _recent_git_commits(self, since: datetime) -> list[dict]:
+        """Best-effort git log of the cwd (the API repo). Walks up from the
+        current working directory looking for a .git folder; returns [] if
+        git isn't on PATH or the cwd isn't a checkout (e.g. running in a
+        bare container)."""
+        if not shutil.which("git"):
+            return []
+        # Walk up looking for .git
+        cwd = Path.cwd().resolve()
+        repo_root: Path | None = None
+        for cand in (cwd, *cwd.parents):
+            if (cand / ".git").exists():
+                repo_root = cand
+                break
+        if repo_root is None:
+            return []
+
+        def _run() -> list[dict]:
+            try:
+                proc = subprocess.run(
+                    [
+                        "git", "log",
+                        f"--since={since.isoformat()}",
+                        "--pretty=format:%H|%an|%ad|%s",
+                        "--date=iso",
+                        "-n", "30",
+                    ],
+                    cwd=str(repo_root),
+                    capture_output=True, text=True, timeout=5,
+                )
+                if proc.returncode != 0:
+                    return []
+                out: list[dict] = []
+                for line in proc.stdout.splitlines():
+                    parts = line.split("|", 3)
+                    if len(parts) == 4:
+                        out.append({
+                            "sha": parts[0][:10],
+                            "author": parts[1],
+                            "date": parts[2],
+                            "subject": parts[3][:200],
+                        })
+                return out
+            except Exception as exc:
+                logger.debug("git log failed: %s", exc)
+                return []
+
+        return await asyncio.to_thread(_run)
 
     async def _aggregate_costs(self, days: int) -> dict[str, Any]:
         """Sum cost_usd across live_sessions + session_archive for last N days."""
