@@ -15,7 +15,7 @@ async function load() {
   body.innerHTML = `<div class="placeholder"><p>Loading cost dashboard…</p></div>`;
 
   try {
-    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external] = await Promise.all([
+    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage] = await Promise.all([
       api.get("/cost/summary"),
       api.get("/cost/timeline", { days: 30 }),
       api.get("/cost/by-source", { days: 7 }),
@@ -29,11 +29,12 @@ async function load() {
       api.get("/cost/empire-summary").catch(() => ({ today: { total: 0, by_provider: {} }, week: { total: 0, by_provider: {} }, month: { total: 0, by_provider: {} } })),
       api.get("/cost/reconciliation").catch(() => ({ reconciliation: [] })),
       api.get("/cost/external", { days: 30 }).catch(() => ({ rows: [] })),
+      api.get("/cost/coverage").catch(() => ({ coverage: [], unexpected_sources: [] })),
     ]);
 
     body.innerHTML = render({
       summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live,
-      empire, recon, external,
+      empire, recon, external, coverage,
     });
     bindCapEditors(caps);
 
@@ -45,7 +46,7 @@ async function load() {
   }
 }
 
-function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external }) {
+function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage }) {
   const dollar = (n) => `$${Number(n || 0).toFixed(4)}`;
   const dollar2 = (n) => `$${Number(n || 0).toFixed(2)}`;
   const pct = (n) => `${Number(n || 0).toFixed(1)}%`;
@@ -247,11 +248,69 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
         ${reconTable}
       </div>
     </div>
+  `;
+
+  // ---------- Empire Coverage Report ------------------------------------
+  const cov = (coverage && coverage.coverage) || [];
+  const ago = (iso) => {
+    if (!iso) return "—";
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60_000)        return `${Math.round(ms/1000)}s ago`;
+    if (ms < 3_600_000)     return `${Math.round(ms/60_000)}m ago`;
+    if (ms < 86_400_000)    return `${Math.round(ms/3_600_000)}h ago`;
+    return `${Math.round(ms/86_400_000)}d ago`;
+  };
+  const statusIcon = (row) => {
+    if (!row.instrumented) return "❌";
+    if (row.calls_24h > 0) return "✅";
+    return "⏸️";
+  };
+  const coverageRows = cov.map((row) => `
+    <tr>
+      <td>${statusIcon(row)} <code>${escape(row.product)}</code></td>
+      <td>${row.instrumented ? "yes" : "no"}</td>
+      <td class="muted">${row.last_seen ? escape(ago(row.last_seen)) : "never"}</td>
+      <td>${row.calls_24h}</td>
+      <td>${dollar(row.cost_24h)}</td>
+    </tr>
+  `).join("");
+  const unexpected = (coverage && coverage.unexpected_sources) || [];
+  const unexpectedRows = unexpected.length ? `
+    <h4 style="margin-top:14px;">Unexpected sources</h4>
+    <p class="muted small">Source systems posting to /cost/ingest that aren't in the expected products list.</p>
+    <table class="admin-table">
+      <thead><tr><th>Source</th><th>Calls (24h)</th><th>Cost (24h)</th><th>Last seen</th></tr></thead>
+      <tbody>${unexpected.map((u) => `
+        <tr>
+          <td><code>${escape(u.product)}</code></td>
+          <td>${u.calls_24h}</td>
+          <td>${dollar(u.cost_24h)}</td>
+          <td class="muted">${escape(ago(u.last_seen))}</td>
+        </tr>`).join("")}</tbody>
+    </table>` : "";
+
+  const coverageSection = `
+    <h2 class="empire-heading">📡 Empire Coverage Report</h2>
+    <div class="cost-card" style="margin: 0 18px 14px;">
+      <p class="muted small">
+        Which KJE products are instrumented for cost logging via the
+        <code>kje-cost-logger</code> module. ✅ = instrumented + active; ⏸️ = instrumented but no
+        calls in 24h; ❌ = never seen. Add a product to <code>EXPECTED_PRODUCTS</code>
+        in <code>api/routes/cost.py</code> to track it here.
+      </p>
+      <table class="admin-table">
+        <thead><tr><th>Product</th><th>Instrumented</th><th>Last activity</th><th>Calls (24h)</th><th>Cost (24h)</th></tr></thead>
+        <tbody>${coverageRows || `<tr><td colspan="5" class="muted">No coverage data yet.</td></tr>`}</tbody>
+      </table>
+      ${unexpectedRows}
+    </div>
     <div class="muted small" style="margin: 0 18px 8px 18px;">— BridgeDeck-internal stats below —</div>
   `;
 
   return `
     ${empireSection}
+
+    ${coverageSection}
 
     ${stats}
 

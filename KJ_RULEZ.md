@@ -61,10 +61,63 @@ empire-wide canonical list and update it when Brain changes.
 
 ---
 
+## EMPIRE COST LOGGING RULE
+
+Any KJE product that calls Anthropic, OpenAI, or any LLM API MUST
+instrument cost reporting via the `kje-cost-logger` module per
+`docs/EMPIRE_COST_LOGGING_BUILD_CARD.md`.
+
+This is the empire-wide standard for cost visibility. Without
+instrumentation, a product is not considered production-ready.
+
+### Default integration
+
+```bash
+pip install kje-cost-logger
+```
+
+```python
+from kje_cost_logger import CostLogger
+import os
+
+logger = CostLogger(
+    bridgedeck_url=os.environ["BRIDGEDECK_URL"],
+    api_key=os.environ["BRIDGEDECK_INGEST_KEY"],
+    source_system="<your_product_name>",     # must match a slug in
+                                              # api/routes/cost.py::EXPECTED_PRODUCTS
+    project_slug="<brain_project_slug>",
+)
+
+# After every Anthropic call:
+await logger.log_anthropic_call(response, model="...", intent="...")
+```
+
+### Why self-reporting (not provider Admin APIs)
+
+Anthropic Admin API ingestion is the gold standard for reconciliation
+but it's gated behind Build Tier 2+ / Enterprise. Live verification
+2026-04-28 confirmed the regular `sk-ant-api03-...` messages key returns
+HTTP 401 "invalid x-api-key" against `/v1/organizations/usage_report/messages`
+and `/cost_report` — admin-only. Until the empire qualifies for that
+tier, self-reporting via BridgeDeck `/cost/ingest` is the baseline
+standard.
+
+### Coverage check
+
+The BridgeDeck Cost tab includes a Coverage Report listing every product
+in `EXPECTED_PRODUCTS` and whether it posted to `/cost/ingest` in the
+last 24h. Products marked `instrumented: false` are the audit list.
+
+---
+
 ## REVISION LOG
 
-- **2026-04-27**: Rule introduced after BridgeDeck Bridge-C burned ~2 hours
-  debugging `/codedeck/projects` (didn't exist) + `Authorization: Bearer`
-  (wrong header). Real endpoint was `/projects` with `x-brain-key` header.
-  Both were guessable from convention but neither was verified against live
-  Brain.
+- **2026-04-27**: Brain Endpoint Verification rule introduced after
+  BridgeDeck Bridge-C burned ~2 hours debugging `/codedeck/projects`
+  (didn't exist) + `Authorization: Bearer` (wrong header). Real endpoint
+  was `/projects` with `x-brain-key` header. Both were guessable from
+  convention but neither was verified against live Brain.
+- **2026-04-29**: Empire Cost Logging rule introduced. Anthropic Admin
+  API ingestion (Phase 3.1) blocked behind Build Tier 2+ — pivoted to
+  empire-wide self-reporting via `kje-cost-logger` module + BridgeDeck
+  `/cost/ingest` endpoint.

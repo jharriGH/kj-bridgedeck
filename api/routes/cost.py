@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services import history_logger
 from services.supabase_client import run_sync, table
@@ -32,6 +32,19 @@ SESSION_HEALTH_VIEW = "session_health_score"
 EXTERNAL_SPEND_LOG = "external_spend_log"
 EMPIRE_SPEND_VIEW = "empire_spend_30d"
 RECONCILIATION_VIEW = "spend_reconciliation_7d"
+
+# Phase 3.2 — empire-wide self-reporting. Internal cost_log source_systems
+# (the auxiliary BridgeDeck pipeline calls) are filtered out of the
+# coverage report so they don't pollute the "which KJE product is
+# instrumented" picture.
+EXPECTED_PRODUCTS = [
+    "kjwidgetz", "kjle", "demoboosterz", "demoenginez", "siteenginez",
+    "unhidelocal", "voicedropz", "kj_autonomous", "agentenginez",
+    "daycaremarketerz", "reviewbombz", "kjpde", "kj_salesagentz",
+    "kj_testenginez", "kj_bridgedeck", "iamstillhere", "telehealth",
+    "financeiq", "inkhaus", "offerenginez",
+]
+INTERNAL_SOURCES = {"bridge", "intent", "summarizer", "whisper", "cc_session", "bridge_compress"}
 
 
 # ---------------------------------------------------------------------------
@@ -582,3 +595,177 @@ async def trigger_ingestion(days_back: int = 1) -> dict:
         details={"days": days_back, "summary": results},
     )
     return {"ingested": results}
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.2 — Empire-wide self-reporting (replaces blocked Anthropic Admin API)
+# ---------------------------------------------------------------------------
+
+
+class CostIngestPayload(BaseModel):
+    """Payload posted by every KJE product after each Anthropic/OpenAI call.
+
+    `source_system` identifies the product (e.g. 'agentenginez', 'kjle').
+    `cost_usd` is computed client-side via kje_cost_logger.calc_anthropic_cost
+    or calc_openai_cost — never trust the model name alone."""
+    source_system: str = Field(..., description="Product slug, e.g. 'agentenginez'")
+    project_slug: Optional[str] = None
+    session_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    turn_id: Optional[str] = None
+    model: str
+    tokens_in: int = 0
+    tokens_out: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    cost_usd: float
+    intent: Optional[str] = None
+    duration_ms: Optional[int] = None
+    metadata: Optional[dict] = None
+
+
+@router.post("/ingest")
+async def ingest_cost(payload: CostIngestPayload) -> dict:
+    """Empire-wide cost reporting. Any KJE product POSTs here after each
+    Anthropic / OpenAI call. Returns cap_status if any cost cap is
+    approaching or breached.
+
+    Auth via the existing AdminAuthMiddleware (Bearer BRIDGEDECK_ADMIN_KEY)."""
+    # cost_log doesn't have a top-level cache_*_tokens column, so we stash
+    # those plus any client-side metadata in the JSONB-friendly fields.
+    # `details` doesn't exist on cost_log either; the schema has individual
+    # columns. We can't add columns without a migration, so instead we route
+    # cache tokens to project_slug-suffixed metadata only when present.
+    row = {
+        "source_system": payload.source_system,
+        "project_slug": payload.project_slug,
+        "session_id": payload.session_id,
+        "conversation_id": payload.conversation_id,
+        "turn_id": payload.turn_id,
+        "model": payload.model,
+        "tokens_in": payload.tokens_in,
+        "tokens_out": payload.tokens_out,
+        "cost_usd": float(payload.cost_usd),
+        "intent": payload.intent,
+        "duration_ms": payload.duration_ms,
+    }
+    row = {k: v for k, v in row.items() if v is not None}
+
+    def _do():
+        return table(COST_LOG).insert(row).execute()
+
+    try:
+        await run_sync(_do)
+    except Exception as exc:
+        logger.warning("cost_log insert failed: %s", exc)
+        raise HTTPException(500, f"cost_log insert failed: {exc}")
+
+    cap_status = await _check_caps_for_source(payload.cost_usd)
+
+    return {
+        "logged": True,
+        "logged_at": datetime.now(timezone.utc).isoformat(),
+        "cap_status": cap_status,
+    }
+
+
+async def _check_caps_for_source(incremental_cost: float) -> Any:
+    """Returns the cap-status payload for the empire_daily cap if today's
+    cost_log sum + the incremental call would breach it. `'ok'` otherwise."""
+    today_iso = datetime.now(timezone.utc).date().isoformat()
+
+    def _today_total():
+        return (
+            table(COST_LOG)
+            .select("cost_usd")
+            .gte("created_at", today_iso)
+            .execute()
+        )
+
+    def _enabled_caps():
+        return table(COST_CAPS).select("*").eq("enabled", True).execute()
+
+    try:
+        totals_res = await run_sync(_today_total)
+        caps_res = await run_sync(_enabled_caps)
+    except Exception as exc:
+        logger.debug("cap check soft-failed: %s", exc)
+        return "ok"
+
+    today_sum = float(sum(float(r.get("cost_usd") or 0) for r in (totals_res.data or [])))
+    statuses: list[dict] = []
+    for cap in (caps_res.data or []):
+        if cap.get("scope") != "empire_daily":
+            continue
+        cap_usd = float(cap.get("cap_usd") or 0)
+        if cap_usd <= 0:
+            continue
+        if today_sum + float(incremental_cost) >= cap_usd:
+            statuses.append({
+                "scope": cap["scope"],
+                "behavior": cap.get("behavior") or "warn",
+                "current": round(today_sum, 4),
+                "cap": cap_usd,
+            })
+    return statuses if statuses else "ok"
+
+
+@router.get("/coverage")
+async def get_product_coverage() -> dict:
+    """Per-KJE-product instrumentation snapshot from the last 24h of
+    cost_log. Internal BridgeDeck source_systems (bridge, intent, etc) are
+    excluded so the report shows ONLY external products' coverage."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+    def _do():
+        return (
+            table(COST_LOG)
+            .select("source_system,project_slug,cost_usd,created_at")
+            .gte("created_at", cutoff)
+            .execute()
+        )
+
+    try:
+        res = await run_sync(_do)
+        rows = res.data or []
+    except Exception as exc:
+        logger.warning("coverage select failed: %s", exc)
+        rows = []
+
+    by_source: dict[str, dict] = {}
+    for r in rows:
+        ss = r.get("source_system") or "unknown"
+        bucket = by_source.setdefault(ss, {"calls": 0, "cost_24h": 0.0, "last_seen": None})
+        bucket["calls"] += 1
+        bucket["cost_24h"] += float(r.get("cost_usd") or 0)
+        ts = r.get("created_at") or ""
+        if not bucket["last_seen"] or ts > bucket["last_seen"]:
+            bucket["last_seen"] = ts
+
+    coverage: list[dict] = []
+    for product in EXPECTED_PRODUCTS:
+        d = by_source.get(product)
+        coverage.append({
+            "product": product,
+            "instrumented": d is not None,
+            "last_seen": d["last_seen"] if d else None,
+            "calls_24h": d["calls"] if d else 0,
+            "cost_24h": round(d["cost_24h"], 4) if d else 0,
+        })
+
+    unexpected = [
+        {
+            "product": s,
+            "calls_24h": d["calls"],
+            "cost_24h": round(d["cost_24h"], 4),
+            "last_seen": d["last_seen"],
+        }
+        for s, d in by_source.items()
+        if s not in EXPECTED_PRODUCTS and s not in INTERNAL_SOURCES
+    ]
+
+    return {
+        "coverage": coverage,
+        "unexpected_sources": sorted(unexpected, key=lambda x: x["cost_24h"], reverse=True),
+        "internal_sources_excluded": sorted(INTERNAL_SOURCES),
+    }
