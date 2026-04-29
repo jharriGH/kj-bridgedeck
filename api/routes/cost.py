@@ -29,6 +29,9 @@ RATE_LIMIT_BLOCKS = "rate_limit_blocks"
 TURN_OUTCOMES = "turn_outcomes"
 COST_BY_INTENT_VIEW = "cost_by_intent_30d"
 SESSION_HEALTH_VIEW = "session_health_score"
+EXTERNAL_SPEND_LOG = "external_spend_log"
+EMPIRE_SPEND_VIEW = "empire_spend_30d"
+RECONCILIATION_VIEW = "spend_reconciliation_7d"
 
 
 # ---------------------------------------------------------------------------
@@ -439,3 +442,143 @@ async def patch_cap(scope: str, body: CapPatch) -> dict:
     )
     rows = res.data or []
     return rows[0] if rows else {"scope": scope, **patch}
+
+
+# ---------------------------------------------------------------------------
+# Phase 3.1 — External billing (Anthropic + OpenAI Admin API ingestion)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/external")
+async def get_external_spend(days: int = 7, provider: Optional[str] = None) -> dict:
+    """Returns billed truth from Anthropic / OpenAI org-level usage. Empty
+    when the migration hasn't run or no admin keys are configured."""
+    days = max(1, min(days, 90))
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
+
+    def _do():
+        q = (
+            table(EXTERNAL_SPEND_LOG)
+            .select("*")
+            .gte("billing_date", cutoff)
+            .order("billing_date", desc=True)
+        )
+        if provider:
+            q = q.eq("provider", provider)
+        return q.execute()
+
+    try:
+        res = await run_sync(_do)
+        return {"days": days, "provider": provider, "rows": res.data or []}
+    except Exception as exc:
+        logger.warning("external spend select failed: %s", exc)
+        return {"days": days, "provider": provider, "rows": []}
+
+
+@router.get("/empire-summary")
+async def get_empire_summary() -> dict:
+    """Total empire AI spend — billed truth from external_spend_log.
+    Returns today / week / month aggregates broken down by provider."""
+    now = datetime.now(timezone.utc)
+    today_iso = now.date().isoformat()
+    week_iso  = (now.date() - timedelta(days=7)).isoformat()
+    month_iso = (now.date() - timedelta(days=30)).isoformat()
+
+    async def _fetch_since(date_iso: str) -> list[dict]:
+        def _do():
+            return (
+                table(EXTERNAL_SPEND_LOG)
+                .select("provider,cost_usd")
+                .gte("billing_date", date_iso)
+                .execute()
+            )
+        try:
+            res = await run_sync(_do)
+            return res.data or []
+        except Exception as exc:
+            logger.warning("empire-summary fetch failed: %s", exc)
+            return []
+
+    today_rows = await _fetch_since(today_iso)
+    week_rows  = await _fetch_since(week_iso)
+    month_rows = await _fetch_since(month_iso)
+
+    def _aggregate(rows: list[dict]) -> dict:
+        by_provider: dict[str, float] = {}
+        total = 0.0
+        for r in rows:
+            p = r.get("provider") or "unknown"
+            c = float(r.get("cost_usd") or 0)
+            by_provider[p] = by_provider.get(p, 0.0) + c
+            total += c
+        return {
+            "total": round(total, 4),
+            "by_provider": {k: round(v, 4) for k, v in by_provider.items()},
+        }
+
+    return {
+        "today": _aggregate(today_rows),
+        "week":  _aggregate(week_rows),
+        "month": _aggregate(month_rows),
+        "as_of": now.isoformat(),
+    }
+
+
+@router.get("/reconciliation")
+async def get_reconciliation() -> dict:
+    """Logged (cost_log) vs billed (external_spend_log) variance from the
+    `spend_reconciliation_7d` view. Returns empty when the view doesn't
+    exist yet."""
+    def _do():
+        return table(RECONCILIATION_VIEW).select("*").execute()
+    try:
+        res = await run_sync(_do)
+        return {"reconciliation": res.data or []}
+    except Exception as exc:
+        logger.warning("reconciliation view select failed: %s", exc)
+        return {"reconciliation": []}
+
+
+@router.post("/external/ingest")
+async def trigger_ingestion(days_back: int = 1) -> dict:
+    """Manual trigger for billing ingestion — useful for backfill.
+    Requires ANTHROPIC_ADMIN_API_KEY and/or OPENAI_ADMIN_API_KEY in env."""
+    days_back = max(1, min(days_back, 30))
+
+    try:
+        from bridge_core.external_billing import ingest_billing_for_date
+    except ImportError as exc:
+        raise HTTPException(500, f"bridge_core.external_billing not importable: {exc}")
+
+    import os as _os
+    a_key = _os.environ.get("ANTHROPIC_ADMIN_API_KEY")
+    o_key = _os.environ.get("OPENAI_ADMIN_API_KEY")
+    if not a_key and not o_key:
+        raise HTTPException(
+            400,
+            "Neither ANTHROPIC_ADMIN_API_KEY nor OPENAI_ADMIN_API_KEY is set "
+            "in the API environment. See docs/POST_DEPLOY.md or the Phase 3.1 "
+            "build prompt for the one-time setup.",
+        )
+
+    today = datetime.now(timezone.utc).date()
+    results: list[dict] = []
+    for i in range(days_back):
+        target = today - timedelta(days=i + 1)
+        summary = await ingest_billing_for_date(
+            supabase_table_fn=table,
+            run_sync_fn=run_sync,
+            target_date=target,
+            anthropic_admin_key=a_key,
+            openai_admin_key=o_key,
+        )
+        results.append(summary)
+
+    await history_logger.log(
+        event_type="billing.ingest_manual",
+        event_category="action",
+        actor="api",
+        action=f"backfill {days_back} day(s)",
+        details={"days": days_back, "summary": results},
+    )
+    return {"ingested": results}

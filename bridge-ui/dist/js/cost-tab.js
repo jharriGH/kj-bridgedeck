@@ -15,7 +15,7 @@ async function load() {
   body.innerHTML = `<div class="placeholder"><p>Loading cost dashboard…</p></div>`;
 
   try {
-    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live] = await Promise.all([
+    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external] = await Promise.all([
       api.get("/cost/summary"),
       api.get("/cost/timeline", { days: 30 }),
       api.get("/cost/by-source", { days: 7 }),
@@ -26,10 +26,14 @@ async function load() {
       api.get("/cost/caps"),
       api.get("/sessions/health"),
       api.get("/cost/live"),
+      api.get("/cost/empire-summary").catch(() => ({ today: { total: 0, by_provider: {} }, week: { total: 0, by_provider: {} }, month: { total: 0, by_provider: {} } })),
+      api.get("/cost/reconciliation").catch(() => ({ reconciliation: [] })),
+      api.get("/cost/external", { days: 30 }).catch(() => ({ rows: [] })),
     ]);
 
     body.innerHTML = render({
       summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live,
+      empire, recon, external,
     });
     bindCapEditors(caps);
 
@@ -41,9 +45,10 @@ async function load() {
   }
 }
 
-function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live }) {
+function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external }) {
   const dollar = (n) => `$${Number(n || 0).toFixed(4)}`;
   const dollar2 = (n) => `$${Number(n || 0).toFixed(2)}`;
+  const pct = (n) => `${Number(n || 0).toFixed(1)}%`;
 
   // 4-stat row
   const stats = `
@@ -168,7 +173,86 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
       <td><button class="btn ghost" data-cap-save="${escape(c.scope)}">Save</button></td>
     </tr>`).join("");
 
+  // ---------- Empire Spend (billed truth from Anthropic + OpenAI) -------
+  const e = empire || { today:{total:0,by_provider:{}}, week:{total:0,by_provider:{}}, month:{total:0,by_provider:{}} };
+  const reconRows = (recon && recon.reconciliation) || [];
+  // 7-day average coverage from reconciliation rows
+  const validCov = reconRows.filter((r) => r.billed_cost > 0);
+  const avgCoverage = validCov.length
+    ? validCov.reduce((s, r) => s + Number(r.coverage_pct || 0), 0) / validCov.length
+    : null;
+  const todayProviders = Object.entries(e.today.by_provider || {})
+    .map(([p, v]) => `${escape(p)}: ${dollar2(v)}`).join(" · ") || "no billing data yet";
+
+  // 30-day per-provider totals from external_spend_log rows
+  const extRows = (external && external.rows) || [];
+  const byProv = { anthropic: 0, openai: 0 };
+  extRows.forEach((r) => { byProv[r.provider] = (byProv[r.provider] || 0) + Number(r.cost_usd || 0); });
+  const provBars = Object.entries(byProv).map(([p, v]) => {
+    const w = Math.round((v / Math.max(0.0001, Math.max(...Object.values(byProv)))) * 100);
+    return `<div class="cost-bar"><span style="width:90px"><b>${escape(p)}</b></span>` +
+           `<div class="fill" style="width:${w}%"></div>` +
+           `<span>${dollar2(v)}</span></div>`;
+  }).join("") || `<p class="muted">No external billing data yet — add admin keys + run /cost/external/ingest.</p>`;
+
+  // Reconciliation table
+  const reconTable = reconRows.length ? `
+    <table class="admin-table">
+      <thead><tr><th>Date</th><th>Logged</th><th>Billed</th><th>Untracked</th><th>Coverage</th></tr></thead>
+      <tbody>${reconRows.map((r) => {
+        const cov = Number(r.coverage_pct || 0);
+        const cls = cov >= 90 ? "" : cov >= 70 ? "warn" : "bad";
+        return `
+          <tr>
+            <td class="muted">${escape((r.date || "").slice(0,10))}</td>
+            <td>${dollar(r.logged_cost)}</td>
+            <td>${dollar(r.billed_cost)}</td>
+            <td>${dollar(r.untracked_cost)}</td>
+            <td class="cov-${cls}">${pct(cov)}</td>
+          </tr>`;
+      }).join("")}</tbody>
+    </table>
+    <p class="muted small">"Untracked" = spend Anthropic billed but BridgeDeck cost_log didn't capture. Coverage &lt;90% suggests an unlogged KJE product.</p>`
+    : `<p class="muted">No reconciliation data yet — apply migration + run ingestion.</p>`;
+
+  const empireSection = `
+    <h2 class="empire-heading">👑 Empire AI Spend (billed truth — Anthropic + OpenAI)</h2>
+    <div class="cost-grid four">
+      <div class="cost-card">
+        <h4>Today</h4>
+        <div class="cost-stat">${dollar2(e.today.total)}</div>
+        <div class="muted small">${todayProviders}</div>
+      </div>
+      <div class="cost-card">
+        <h4>7 days</h4>
+        <div class="cost-stat">${dollar2(e.week.total)}</div>
+      </div>
+      <div class="cost-card">
+        <h4>30 days</h4>
+        <div class="cost-stat">${dollar2(e.month.total)}</div>
+      </div>
+      <div class="cost-card">
+        <h4>Coverage (logged ÷ billed)</h4>
+        <div class="cost-stat">${avgCoverage === null ? "—" : pct(avgCoverage)}</div>
+        <div class="muted small">7-day avg from reconciliation</div>
+      </div>
+    </div>
+    <div class="cost-grid two">
+      <div class="cost-card">
+        <h4>By provider (last 30d)</h4>
+        ${provBars}
+      </div>
+      <div class="cost-card">
+        <h4>Logged vs Billed (last 7d)</h4>
+        ${reconTable}
+      </div>
+    </div>
+    <div class="muted small" style="margin: 0 18px 8px 18px;">— BridgeDeck-internal stats below —</div>
+  `;
+
   return `
+    ${empireSection}
+
     ${stats}
 
     <div class="cost-grid two">

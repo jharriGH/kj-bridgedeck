@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure repo root is on sys.path so `import shared.contracts` works in both
@@ -109,21 +111,58 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("ANTHROPIC_API_KEY not set — bridge chat + executor disabled")
 
+    # Phase 3.1 — empire billing ingestion daily cron. Fires at 02:00 UTC if
+    # at least one Admin API key is configured. Pulls yesterday's spend
+    # from Anthropic + OpenAI org-level usage APIs.
+    app.state.billing_cron_task = None
+    if os.environ.get("ANTHROPIC_ADMIN_API_KEY") or os.environ.get("OPENAI_ADMIN_API_KEY"):
+        app.state.billing_cron_task = asyncio.create_task(_billing_ingestion_loop())
+        logger.info("Billing ingestion cron started (next run: 02:00 UTC)")
+    else:
+        logger.info("No admin API keys set — billing cron disabled")
+
     try:
         yield
     finally:
         executor = app.state.action_executor
         task = app.state.action_executor_task
+        billing_task = app.state.billing_cron_task
         if executor is not None:
             await executor.stop()
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
+        for t in (task, billing_task):
+            if t is not None:
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
         await SettingsCache.close()
         logger.info("shutdown complete")
+
+
+async def _billing_ingestion_loop() -> None:
+    """Sleep until 02:00 UTC, run yesterday's billing ingest, then loop."""
+    from bridge_core.external_billing import daily_cron
+    from services.supabase_client import run_sync as sb_run_sync, table as sb_table
+
+    while True:
+        now = datetime.now(timezone.utc)
+        target = now.replace(hour=2, minute=0, second=0, microsecond=0)
+        if now >= target:
+            target = target + timedelta(days=1)
+        sleep_seconds = max(60.0, (target - now).total_seconds())
+        try:
+            await asyncio.sleep(sleep_seconds)
+        except asyncio.CancelledError:
+            return
+        try:
+            result = await daily_cron(
+                supabase_table_fn=sb_table,
+                run_sync_fn=sb_run_sync,
+            )
+            logger.info("Billing cron complete: %s", result)
+        except Exception as exc:
+            logger.exception("Billing cron failed: %s", exc)
 
 
 def _resolve_models_dir(piper_model_env: str | None) -> str | None:

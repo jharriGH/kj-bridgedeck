@@ -176,6 +176,17 @@ kbd {
 .cost-grid.two  { grid-template-columns: 1fr 1fr; }
 .cost-tab-body  { padding-bottom: 24px; }
 
+.empire-heading {
+  margin: 14px 18px 0; padding: 8px 12px;
+  font-size: 15px; letter-spacing: 0.5px;
+  background: linear-gradient(90deg, var(--accent-soft) 0%, transparent 80%);
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+}
+
+.admin-table .cov-warn { color: var(--warn); }
+.admin-table .cov-bad  { color: var(--bad); font-weight: 600; }
+
 .rate-row {
   display: flex; align-items: center; gap: 8px;
   padding: 4px 0; font-family: var(--mono); font-size: 12px;
