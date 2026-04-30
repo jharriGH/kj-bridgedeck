@@ -1,0 +1,147 @@
+{
+  "name": "_TEMPLATE_agent_with_cost_logging",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        300,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.ANTHROPIC_API_KEY }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-5\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\"role\": \"user\", \"content\": \"<your prompt here>\"}\n  ]\n}"
+      },
+      "id": "anthropic-1",
+      "name": "Anthropic Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        700,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://kj-bridgedeck-api.onrender.com/cost/ingest",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer bridgedeck-kj-2026-kingjames"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"source_system\": \"kj_autonomous\",\n  \"project_slug\": \"kj_autonomous\",\n  \"model\": \"{{ $json.model || 'claude-sonnet-4-5' }}\",\n  \"tokens_in\": {{ $json.usage?.input_tokens || 0 }},\n  \"tokens_out\": {{ $json.usage?.output_tokens || 0 }},\n  \"cache_read_tokens\": {{ $json.usage?.cache_read_input_tokens || 0 }},\n  \"cache_write_tokens\": {{ $json.usage?.cache_creation_input_tokens || 0 }},\n  \"cost_usd\": {{ ((($json.usage?.input_tokens || 0) / 1000000) * 3.0) + ((($json.usage?.output_tokens || 0) / 1000000) * 15.0) }},\n  \"intent\": \"agent_template_demo\"\n}",
+        "options": {
+          "timeout": 5000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "bridgedeck-cost-1",
+      "name": "Log Cost to BridgeDeck",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pass through the original Anthropic response for downstream nodes.\nconst anthropic = $('Anthropic Call').item.json;\nreturn { json: anthropic };"
+      },
+      "id": "passthrough-1",
+      "name": "Pass through Anthropic response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Anthropic Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Call": {
+      "main": [
+        [
+          {
+            "node": "Log Cost to BridgeDeck",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Cost to BridgeDeck": {
+      "main": [
+        [
+          {
+            "node": "Pass through Anthropic response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    "kj_empire",
+    "cost_logging",
+    "template"
+  ]
+}

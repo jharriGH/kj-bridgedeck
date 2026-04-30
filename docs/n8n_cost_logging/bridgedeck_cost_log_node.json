@@ -1,0 +1,45 @@
+{
+  "name": "Log Cost to BridgeDeck",
+  "type": "n8n-nodes-base.httpRequest",
+  "typeVersion": 4.2,
+  "position": [
+    1500,
+    300
+  ],
+  "parameters": {
+    "method": "POST",
+    "url": "=https://kj-bridgedeck-api.onrender.com/cost/ingest",
+    "sendHeaders": true,
+    "headerParameters": {
+      "parameters": [
+        {
+          "name": "Authorization",
+          "value": "=Bearer bridgedeck-kj-2026-kingjames"
+        },
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ]
+    },
+    "sendBody": true,
+    "bodyContentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={\n  \"source_system\": \"kj_autonomous\",\n  \"project_slug\": \"kj_autonomous\",\n  \"model\": \"{{ $json.model || 'claude-sonnet-4-5' }}\",\n  \"tokens_in\": {{ $json.usage?.input_tokens || 0 }},\n  \"tokens_out\": {{ $json.usage?.output_tokens || 0 }},\n  \"cache_read_tokens\": {{ $json.usage?.cache_read_input_tokens || 0 }},\n  \"cache_write_tokens\": {{ $json.usage?.cache_creation_input_tokens || 0 }},\n  \"cost_usd\": {{ ((($json.usage?.input_tokens || 0) / 1000000) * 3.0) + ((($json.usage?.output_tokens || 0) / 1000000) * 15.0) }},\n  \"intent\": \"agent_<N>_<task>\"\n}",
+    "options": {
+      "timeout": 5000,
+      "redirect": {
+        "redirect": {
+          "followRedirects": false
+        }
+      },
+      "response": {
+        "response": {
+          "neverError": true
+        }
+      }
+    }
+  },
+  "credentials": {},
+  "notes": "Empire-wide cost reporting per KJ_RULEZ. Drop this node immediately after each Anthropic HTTP Request node in any kj_autonomous workflow. The 'never error' option means a BridgeDeck outage will not break the agent. Update the `intent` value to identify which agent this is (e.g. 'agent_1_lead_qualify')."
+}
