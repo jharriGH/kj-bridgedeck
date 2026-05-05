@@ -156,6 +156,103 @@ Jim has arthritis and brain fog. Manual dashboard clicking across 5+ services to
 
 ---
 
+═══════════════════════════════════════════════
+MANDATORY BRAIN SESSION START RULE
+Added: 2026-05-05
+═══════════════════════════════════════════════
+
+EVERY Claude session — claude.ai, Claude Code,
+or desktop app — MUST start with Brain context.
+No exceptions. No excuses.
+
+WHAT IS BRAIN?
+Jim Brain is the persistent memory and 
+intelligence layer for the entire King James 
+Empire. It stores every decision, every build 
+state, every project status, and every lesson 
+learned across all products.
+URL: https://jim-brain-production.up.railway.app
+Key: jim-brain-kje-2026-kingjames
+
+FOR CLAUDE CODE SESSIONS:
+First thing typed in every CC session:
+brain_session_start(
+  focus="[what you are building today]",
+  product="[project_id]"
+)
+This loads full empire context, recent memories,
+and the latest build card automatically.
+Available project IDs: kjwidgetz, kjle, 
+jim_brain, demoboosterz, demoenginez,
+kj_salesagentz, kj_autonomous, voicedropz,
+unhidelocal, siteenginez, reviewbombz,
+iasy, kj_codedeck, agentenginez
+
+FOR CLAUDE.AI SESSIONS:
+Open Brain UI → select project in filter bar
+→ click Copy Session Starter (top right)
+→ paste as FIRST message in new chat
+
+FOR QUICK SESSIONS (no Brain UI available):
+Paste this as first message:
+---
+I am Jim Harris, King James Empire.
+Brain: https://jim-brain-production.up.railway.app
+Key: jim-brain-kje-2026-kingjames
+Project: [project name]
+Please fetch GET /context GET /projects GET /cards
+and give me a full briefing before we start.
+---
+
+IF A CLAUDE ASKS "WHAT IS BRAIN?" OR SEEMS
+UNINFORMED ABOUT THE EMPIRE:
+STOP immediately. Do not continue building.
+Paste the session starter above first.
+A Claude without Brain context will waste time
+and make decisions that contradict empire rules.
+
+BRAIN SESSION END RULE:
+Every CC session MUST end with:
+brain_session_end(
+  product="[project_id]",
+  what_shipped="[what was built]",
+  decisions="[key decisions made]",
+  next_action="[single most important next task]"
+)
+Then: brain_save_card(title, project, content)
+with the full current build state.
+
+BRAIN SYNC RULE:
+Run every morning before starting work:
+python C:\Users\Jim\Documents\GitHub\brain_sync.py
+This refreshes all CLAUDE.md files across all
+repos with the latest Brain state.
+Automated via Windows Task Scheduler at 7am.
+
+GOTCHA LOGGING RULE:
+Any bug, workaround, or lesson learned MUST
+be logged to Brain immediately:
+brain_memory(
+  content="[project] gotcha: [what happened]
+  and [how to avoid next time]",
+  tags=["[project]", "gotcha", "lesson"]
+)
+Do not wait until end of session.
+Log gotchas while context is fresh.
+
+NEW PROJECT RULE:
+Every new KJE project must be registered in
+Brain before building starts:
+1. Brain UI → Manage Projects → Add New
+2. Fill: name, emoji, status, description,
+   repo_path
+3. python brain_sync.py [project_id]
+4. Start building with brain_session_start()
+
+═══════════════════════════════════════════════
+
+---
+
 ## REVISION LOG
 
 - **2026-04-27**: Brain Endpoint Verification rule introduced after

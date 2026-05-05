@@ -1,3 +1,14 @@
+---
+## MANDATORY: START EVERY SESSION WITH THIS
+brain_session_start(
+  focus="[describe what you are working on]",
+  product="[this repo's project id]"
+)
+Brain URL: https://jim-brain-production.up.railway.app
+Brain Key: jim-brain-kje-2026-kingjames
+DO THIS BEFORE ANY OTHER WORK. NO EXCEPTIONS.
+---
+
 # KJ BridgeDeck — Empire Context
 
 **Product:** KJ BridgeDeck — visual terminal management + voice-first empire command interface
