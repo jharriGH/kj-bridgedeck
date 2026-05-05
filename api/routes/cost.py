@@ -46,6 +46,25 @@ EXPECTED_PRODUCTS = [
 ]
 INTERNAL_SOURCES = {"bridge", "intent", "summarizer", "whisper", "cc_session", "bridge_compress"}
 
+# kj_bridgedeck never writes cost_log rows under its own slug — it writes
+# under the internal sub-source names ("bridge", "intent", "summarizer",
+# "cc_session", "whisper", "bridge_compress"). For coverage attribution
+# (which product is instrumented), we roll those internal sources back
+# up to the kj_bridgedeck product. Other endpoints (/cost/by-source,
+# /cost/timeline) keep raw source_system so the per-source breakdown
+# stays meaningful.
+INTERNAL_KJ_BRIDGEDECK_SOURCES = {
+    "bridge", "intent", "summarizer",
+    "cc_session", "whisper", "bridge_compress",
+}
+
+
+def map_source_to_product(source_system: str) -> str:
+    """Roll up internal Bridge sub-sources into the kj_bridgedeck product."""
+    if source_system in INTERNAL_KJ_BRIDGEDECK_SOURCES:
+        return "kj_bridgedeck"
+    return source_system
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -732,10 +751,14 @@ async def get_product_coverage() -> dict:
         logger.warning("coverage select failed: %s", exc)
         rows = []
 
-    by_source: dict[str, dict] = {}
+    # Aggregate by PRODUCT (after rolling internal Bridge sub-sources up to
+    # kj_bridgedeck). A product is instrumented iff at least one cost_log
+    # row in the last 24h maps to it.
+    by_product: dict[str, dict] = {}
     for r in rows:
         ss = r.get("source_system") or "unknown"
-        bucket = by_source.setdefault(ss, {"calls": 0, "cost_24h": 0.0, "last_seen": None})
+        product = map_source_to_product(ss)
+        bucket = by_product.setdefault(product, {"calls": 0, "cost_24h": 0.0, "last_seen": None})
         bucket["calls"] += 1
         bucket["cost_24h"] += float(r.get("cost_usd") or 0)
         ts = r.get("created_at") or ""
@@ -744,7 +767,7 @@ async def get_product_coverage() -> dict:
 
     coverage: list[dict] = []
     for product in EXPECTED_PRODUCTS:
-        d = by_source.get(product)
+        d = by_product.get(product)
         coverage.append({
             "product": product,
             "instrumented": d is not None,
@@ -755,13 +778,13 @@ async def get_product_coverage() -> dict:
 
     unexpected = [
         {
-            "product": s,
+            "product": p,
             "calls_24h": d["calls"],
             "cost_24h": round(d["cost_24h"], 4),
             "last_seen": d["last_seen"],
         }
-        for s, d in by_source.items()
-        if s not in EXPECTED_PRODUCTS and s not in INTERNAL_SOURCES
+        for p, d in by_product.items()
+        if p not in EXPECTED_PRODUCTS
     ]
 
     return {
