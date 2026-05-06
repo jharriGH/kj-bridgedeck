@@ -251,6 +251,40 @@ Brain before building starts:
 
 ═══════════════════════════════════════════════
 
+═══════════════════════════════════════════════
+BRAIN LOGGING OWNERSHIP RULE
+Added: 2026-05-05
+═══════════════════════════════════════════════
+
+BRAIN LOGGING IS NOT OPTIONAL AND NOT JIM'S JOB.
+Claude logs to Brain. Not Jim. Ever.
+
+If you are asking Jim which option to use for
+logging — you are doing it wrong. Pick one and execute.
+
+RULES FOR EVERY CLAUDE SESSION:
+1. YOU decide how to log. Never ask Jim.
+2. YOU write the curl commands. Never ask Jim.
+3. YOU execute the logging. Never ask Jim.
+4. YOU choose /log or /memory based on these rules:
+   - Decision/lesson/bug fix → POST /memory (semantic)
+   - Progress/event/automated → POST /log (fast)
+5. YOU update next_action on the project.
+6. YOU save the build card at session end.
+
+WHEN ASKED "WHAT OPTION?" OR "HOW SHOULD I LOG?":
+Wrong question. There is no option. Just log it.
+Use Option B always — write the script, run it,
+confirm it worked, report back to Jim with results.
+
+CLOSING RITUAL — MANDATORY EVERY SESSION:
+Step 1: POST /memory — full session summary
+Step 2: PATCH /projects — update next_action
+Step 3: POST /cards — save full build state
+No exceptions. No asking. Just execute.
+
+═══════════════════════════════════════════════
+
 ---
 
 ## REVISION LOG
@@ -269,3 +303,8 @@ Brain before building starts:
   Render/Railway/Cloudflare/Vercel/GitHub APIs. Required tokens
   (RENDER_API_KEY, RAILWAY_TOKEN, CF_API_TOKEN) gated through CC's
   environment; CC asks once if missing, never repeatedly.
+- **2026-05-05**: Brain Logging Ownership rule introduced. Brain logging
+  is Claude's job — not Jim's. CC must pick /log vs /memory itself,
+  write and execute the curl, then run the closing ritual (POST /memory,
+  PATCH /projects, POST /cards) at session end. No more asking Jim
+  "which option?" — there is no option, just log it.
