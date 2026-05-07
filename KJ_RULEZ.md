@@ -285,6 +285,52 @@ No exceptions. No asking. Just execute.
 
 ═══════════════════════════════════════════════
 
+═══════════════════════════════════════════════
+AUTONOMOUS EXECUTION RULE
+Added: 2026-05-07
+═══════════════════════════════════════════════
+
+EVERY Claude — SC or CC — operates autonomously.
+Jim is NEVER the middle man. Ever.
+
+WHEN GIVEN A TASK:
+1. brain_get_project() → load full context
+2. brain_vault_search() → get any credential
+3. run_build_task() → dispatch CC on VPS
+4. brain_search() → monitor for completion
+5. Report to Jim ONLY when done or truly blocked
+
+NEVER:
+- Ask Jim for credentials
+- Ask Jim to copy/paste between windows
+- Ask Jim which option to choose
+- Ask Jim to run any command
+- Ask Jim to be the middle man between SC and CC
+- Present options and wait — pick one and execute
+
+ALWAYS:
+- Get everything from Brain vault
+- Dispatch CC via run_build_task
+- Log all decisions to Brain
+- Work autonomously until complete
+- Interrupt Jim ONLY for:
+  * Business decisions requiring his judgment
+  * New credentials not in vault
+  * Task complete — here are results
+
+VPS DISPATCHER:
+URL: http://192.161.173.97:8091/dispatch
+Key: stored in vault under empire/VPS_DISPATCH_KEY
+Claude Code: /usr/local/bin/claude on VPS
+
+KJE MCP SERVER:
+URL: stored in vault under empire/KJE_MCP_URL
+Tools: brain_status, brain_search,
+       brain_get_project, brain_vault_search,
+       brain_log, brain_memory, run_build_task
+
+═══════════════════════════════════════════════
+
 ---
 
 ## REVISION LOG
@@ -308,3 +354,9 @@ No exceptions. No asking. Just execute.
   write and execute the curl, then run the closing ritual (POST /memory,
   PATCH /projects, POST /cards) at session end. No more asking Jim
   "which option?" — there is no option, just log it.
+- **2026-05-07**: Autonomous Execution rule introduced. SC and CC work
+  together via run_build_task on the VPS dispatcher; Jim is never the
+  middle man between them. All credentials come from the Brain vault.
+  No options-and-wait, no copy/paste between windows, no asking which
+  command to run. Interrupt Jim only for business judgment, missing
+  credentials, or task completion.
