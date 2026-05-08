@@ -168,3 +168,37 @@ cd bridge-ui && npm run dev
 # Flush Brain queue manually
 pwsh install/brain_flush.ps1
 ```
+
+## Empire credentials — persistent storage
+
+All platform tokens for env var automation live at:
+
+    %USERPROFILE%\.kje\secrets.env
+
+Currently stored:
+- `RENDER_API_KEY`  (set 2026-05-07) — manages all Render services
+- `RAILWAY_TOKEN`   (pending — set when first Railway env op needed)
+- `CF_API_TOKEN`    (pending — set when first Cloudflare Pages env op needed)
+
+Source of truth is Brain Vault under the `empire` project (e.g.
+`empire/RENDER_API_KEY`). The local file is a session-bootstrap
+convenience so CC sessions don't need to re-fetch from vault on every
+launch.
+
+To load all empire credentials into the current PowerShell session:
+
+```powershell
+Get-Content $env:USERPROFILE\.kje\secrets.env | ForEach-Object {
+    if ($_ -match '^([^=#]+)=(.*)$') {
+        Set-Item -Path "env:$($matches[1])" -Value $matches[2]
+    }
+}
+```
+
+Bash equivalent:
+
+```bash
+set -a && source "$USERPROFILE/.kje/secrets.env" && set +a
+```
+
+`secrets.env` is OUTSIDE the repo and must never be committed.
