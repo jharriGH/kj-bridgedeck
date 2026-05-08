@@ -64,7 +64,10 @@ class CostLogger:
         cache_read  = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
         cache_write = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
 
-        cost = calc_anthropic_cost(model, tokens_in, tokens_out, cache_read, cache_write)
+        cost = calc_anthropic_cost(
+            model, tokens_in, tokens_out, cache_read, cache_write,
+            source_system=self.source_system,
+        )
 
         return await self._post({
             "source_system": self.source_system,
@@ -101,7 +104,10 @@ class CostLogger:
         tokens_in  = int(getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
         tokens_out = int(getattr(usage, "completion_tokens", 0) or 0) if usage else 0
 
-        cost = calc_openai_cost(model, tokens_in, tokens_out, audio_minutes)
+        cost = calc_openai_cost(
+            model, tokens_in, tokens_out, audio_minutes,
+            source_system=self.source_system,
+        )
 
         meta = {"audio_minutes": audio_minutes} if audio_minutes else {}
         if metadata:
