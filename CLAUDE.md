@@ -177,8 +177,8 @@ All platform tokens for env var automation live at:
 
 Currently stored:
 - `RENDER_API_KEY`  (set 2026-05-07) — manages all Render services
+- `CF_API_TOKEN`    (set 2026-05-07) — manages all Cloudflare zones + Pages projects
 - `RAILWAY_TOKEN`   (pending — set when first Railway env op needed)
-- `CF_API_TOKEN`    (pending — set when first Cloudflare Pages env op needed)
 
 Source of truth is Brain Vault under the `empire` project (e.g.
 `empire/RENDER_API_KEY`). The local file is a session-bootstrap
