@@ -286,6 +286,69 @@ No exceptions. No asking. Just execute.
 ═══════════════════════════════════════════════
 
 ═══════════════════════════════════════════════
+STATUS BANNER + CHAT SIZE + EMPIRE AWARENESS RULE
+Added: 2026-05-10
+═══════════════════════════════════════════════
+
+EVERY response from EVERY Claude (SC or CC) MUST
+end with this banner — no exceptions.
+
+┌─────────────────────────────────────────────┐
+│ 📊 PROJECT: [name] — [X]% complete         │
+│ 📍 PHASE:   [current phase] — [X]% complete │
+│ 💬 CHAT:    ~[X]% full                     │
+└─────────────────────────────────────────────┘
+
+For SC sessions, also include the active sessions
+table populated from brain_search("active session"):
+
+┌──────────────┬───────────────────────┬──────────────┐
+│ Session      │ Status                │ Jim Needed?  │
+├──────────────┼───────────────────────┼──────────────┤
+│ [project] SC │ [what it's doing]     │ [Yes/No]     │
+│ [project] CC │ [building X]          │ None—auto    │
+│ This chat    │ Strategic coordinator │ Reading this │
+└──────────────┴───────────────────────┴──────────────┘
+
+CHAT SIZE ESTIMATION:
+- Rough formula: message_count × 1500 / 200000 × 100
+- Warn at 70%: "💬 Chat getting full — consider new chat"
+- Hard suggest at 85%: "⚠️ Open new chat now to avoid losing context"
+- Critical at 95%: "🚨 OPEN NEW CHAT IMMEDIATELY"
+
+FULL BRAIN + MCP + VAULT + DISPATCHER AWARENESS
+(every Claude must know without being told):
+
+  BRAIN API:  https://jim-brain-production.up.railway.app
+  BRAIN KEY:  jim-brain-kje-2026-kingjames  (header: x-brain-key)
+  MCP URL:    https://kje-mcp.onrender.com/mcp/T24NM1Sxbh7txJs-unNIjblaXMqA1OZW6gNU-Ud5Yjk/
+  VPS:        192.161.173.97 (ccrunner, /usr/local/bin/claude)
+  DISPATCHER: http://192.161.173.97:8091/dispatch
+  NOTIFY:     POST /notify  body {severity, message, channel, project}
+
+7 BRAIN TOOLS (use without being asked):
+  brain_status        — empire health check
+  brain_search        — search all memories
+  brain_get_project   — full project context
+  brain_vault_search  — ANY credential from vault
+  brain_log           — fast event log
+  brain_memory        — semantic memory store
+  run_build_task      — dispatch CC on VPS
+
+VAULT HAS EVERYTHING — never ask Jim for:
+  API keys, tokens, passwords, Supabase URLs,
+  Stripe keys, Twilio creds, Render API keys,
+  Railway tokens, GitHub PAT, RackNerd VPS creds,
+  Resend keys, Anthropic keys, Cloudflare tokens,
+  Qdrant, n8n, Vapi — everything is in vault.
+  Always: brain_vault_search("what you need")
+
+No response is complete without the banner.
+No exception. No excuse.
+
+═══════════════════════════════════════════════
+
+═══════════════════════════════════════════════
 AUTONOMOUS EXECUTION RULE
 Added: 2026-05-07
 ═══════════════════════════════════════════════
@@ -360,3 +423,11 @@ Tools: brain_status, brain_search,
   No options-and-wait, no copy/paste between windows, no asking which
   command to run. Interrupt Jim only for business judgment, missing
   credentials, or task completion.
+- **2026-05-10**: Status Banner + Chat Size + Empire Awareness rule
+  introduced. Every Claude (SC or CC) must end every response with a
+  status banner (project %, phase %, chat %), and SCs must show an
+  active sessions table. Chat-size warnings fire at 70/85/95%. Full
+  Brain/MCP/Vault/Dispatcher coordinates are now baked into the rule
+  so every Claude knows them without being told. AUTONOMOUS_EXECUTION_BLOCK
+  in brain_sync.py updated in lockstep so all repos pick up the rule
+  on next sync.
