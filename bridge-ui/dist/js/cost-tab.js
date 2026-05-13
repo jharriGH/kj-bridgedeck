@@ -1,7 +1,7 @@
 // Cost tab — full empire cost dashboard.
 // Pulls /cost/summary, /cost/timeline, /cost/by-source, /cost/by-intent,
 // /cost/rate-limit, /cost/wasted-cost, /cost/refund-worthy, /cost/caps,
-// /sessions/health and renders one HUD-styled grid.
+// /sessions/health, /cost/hosting and renders one HUD-styled grid.
 import * as api from "./api.js";
 import { toast } from "./toast.js";
 
@@ -15,7 +15,7 @@ async function load() {
   body.innerHTML = `<div class="placeholder"><p>Loading cost dashboard…</p></div>`;
 
   try {
-    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage] = await Promise.all([
+    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting] = await Promise.all([
       api.get("/cost/summary"),
       api.get("/cost/timeline", { days: 30 }),
       api.get("/cost/by-source", { days: 7 }),
@@ -30,11 +30,12 @@ async function load() {
       api.get("/cost/reconciliation").catch(() => ({ reconciliation: [] })),
       api.get("/cost/external", { days: 30 }).catch(() => ({ rows: [] })),
       api.get("/cost/coverage").catch(() => ({ coverage: [], unexpected_sources: [] })),
+      api.get("/cost/hosting").catch(() => ({ total_monthly_estimated_usd: 0, service_count: 0, services: [], notes: "Hosting endpoint unavailable." })),
     ]);
 
     body.innerHTML = render({
       summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live,
-      empire, recon, external, coverage,
+      empire, recon, external, coverage, hosting,
     });
     bindCapEditors(caps);
 
@@ -46,7 +47,7 @@ async function load() {
   }
 }
 
-function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage }) {
+function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting }) {
   const dollar = (n) => `$${Number(n || 0).toFixed(4)}`;
   const dollar2 = (n) => `$${Number(n || 0).toFixed(2)}`;
   const pct = (n) => `${Number(n || 0).toFixed(1)}%`;
@@ -216,6 +217,38 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
     <p class="muted small">"Untracked" = spend Anthropic billed but BridgeDeck cost_log didn't capture. Coverage &lt;90% suggests an unlogged KJE product.</p>`
     : `<p class="muted">No reconciliation data yet — apply migration + run ingestion.</p>`;
 
+  // ---------- Hosting — Render (Phase 3.3 chunk 1) ---------------------
+  const h = hosting || { total_monthly_estimated_usd: 0, service_count: 0, services: [], notes: "" };
+  const topSvcs = (h.services || []).slice(0, 5);
+  const anyUnknown = (h.services || []).some((s) => s.unknown);
+  const hostingList = topSvcs.length ? `
+    <ul class="cost-service-list">
+      ${topSvcs.map((s) => `
+        <li>
+          <span><b>${escape(s.name)}</b> <span class="svc-meta">· ${escape(s.plan)}</span></span>
+          <span class="svc-cost${s.unknown ? " unknown" : ""}">${s.unknown ? "?" : dollar2(s.monthly_usd)}</span>
+        </li>
+      `).join("")}
+    </ul>` : `<p class="muted">No services returned from Render.</p>`;
+  const hostingSection = `
+    <h2 class="empire-heading">🛰️ Hosting — Render</h2>
+    <div class="cost-grid two">
+      <div class="cost-card">
+        <h4>Estimated monthly spend</h4>
+        <div class="cost-stat gold">${dollar2(h.total_monthly_estimated_usd)}</div>
+        <div class="muted small">
+          ${h.service_count || 0} services · plan-estimate · live API pull
+          ${anyUnknown ? ' · <span style="color:var(--warn)">⚠ unknown plan(s)</span>' : ""}
+        </div>
+      </div>
+      <div class="cost-card">
+        <h4>Top services by cost</h4>
+        ${hostingList}
+        <p class="muted small" style="margin-top:8px;">${escape(h.notes || "")}</p>
+      </div>
+    </div>
+  `;
+
   const empireSection = `
     <h2 class="empire-heading">👑 Empire AI Spend (billed truth — Anthropic + OpenAI)</h2>
     <div class="cost-grid four">
@@ -309,6 +342,8 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
 
   return `
     ${empireSection}
+
+    ${hostingSection}
 
     ${coverageSection}
 

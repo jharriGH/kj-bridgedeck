@@ -477,6 +477,20 @@ async def patch_cap(scope: str, body: CapPatch) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# GET /cost/hosting   (Phase 3.3 — chunk 1: Render)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/hosting")
+async def cost_hosting() -> dict:
+    """Static-plan-rate hosting spend estimate. Chunk 1 covers Render only;
+    CF + Twilio land in subsequent chunks. Auth is enforced by the global
+    AdminAuthMiddleware (same as every other /cost/* route)."""
+    from services.render_billing import get_render_spend
+    return await get_render_spend()
+
+
+# ---------------------------------------------------------------------------
 # Phase 3.1 — External billing (Anthropic + OpenAI Admin API ingestion)
 # ---------------------------------------------------------------------------
 

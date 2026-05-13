@@ -11,6 +11,7 @@
   --text-dim: #6c7d92;
   --accent: #00e5ff;
   --accent-soft: rgba(0, 229, 255, 0.12);
+  --accent-gold: #f5c14a;
   --warn: #ffb84d;
   --bad: #ff6868;
   --good: #5fff9b;
@@ -207,6 +208,19 @@ kbd {
 }
 .cost-card h4 { margin: 0 0 8px; font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
 .cost-stat { font-family: var(--mono); font-size: 22px; }
+.cost-stat.gold { color: var(--accent-gold); }
+.cost-service-list {
+  list-style: none; padding: 0; margin: 8px 0 0;
+  font-family: var(--mono); font-size: 12px;
+}
+.cost-service-list li {
+  display: flex; justify-content: space-between; gap: 8px;
+  padding: 3px 0; border-bottom: 1px dashed var(--line);
+}
+.cost-service-list li:last-child { border-bottom: none; }
+.cost-service-list .svc-meta { color: var(--text-dim); }
+.cost-service-list .svc-cost { color: var(--accent-gold); }
+.cost-service-list .svc-cost.unknown { color: var(--warn); }
 .cost-heatmap {
   display: grid; grid-template-columns: repeat(15, 1fr);
   gap: 2px; padding: 4px 0;
