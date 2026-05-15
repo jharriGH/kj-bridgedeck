@@ -1,8 +1,8 @@
 // Cost tab — full empire cost dashboard.
 // Pulls /cost/summary, /cost/timeline, /cost/by-source, /cost/by-intent,
 // /cost/rate-limit, /cost/wasted-cost, /cost/refund-worthy, /cost/caps,
-// /sessions/health, /cost/hosting, /hosting/cloudflare/spend
-// and renders one HUD-styled grid.
+// /sessions/health, /cost/hosting, /hosting/cloudflare/spend,
+// /hosting/twilio/spend and renders one HUD-styled grid.
 import * as api from "./api.js";
 import { toast } from "./toast.js";
 
@@ -16,7 +16,7 @@ async function load() {
   body.innerHTML = `<div class="placeholder"><p>Loading cost dashboard…</p></div>`;
 
   try {
-    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting, cloudflare] = await Promise.all([
+    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting, cloudflare, twilio] = await Promise.all([
       api.get("/cost/summary"),
       api.get("/cost/timeline", { days: 30 }),
       api.get("/cost/by-source", { days: 7 }),
@@ -33,11 +33,12 @@ async function load() {
       api.get("/cost/coverage").catch(() => ({ coverage: [], unexpected_sources: [] })),
       api.get("/cost/hosting").catch(() => ({ total_monthly_estimated_usd: 0, service_count: 0, services: [], notes: "Hosting endpoint unavailable." })),
       api.get("/hosting/cloudflare/spend").catch(() => ({ monthly_total_usd: 0, subscriptions: [], configured: false, notes: "Cloudflare endpoint unavailable.", gaps: [] })),
+      api.get("/hosting/twilio/spend").catch(() => ({ monthly_total_usd: 0, usage_by_category: [], phone_numbers: { count: 0, monthly_cost: 0 }, balance_usd: 0, configured: false, notes: "Twilio endpoint unavailable." })),
     ]);
 
     body.innerHTML = render({
       summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live,
-      empire, recon, external, coverage, hosting, cloudflare,
+      empire, recon, external, coverage, hosting, cloudflare, twilio,
     });
     bindCapEditors(caps);
 
@@ -49,7 +50,7 @@ async function load() {
   }
 }
 
-function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting, cloudflare }) {
+function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting, cloudflare, twilio }) {
   const dollar = (n) => `$${Number(n || 0).toFixed(4)}`;
   const dollar2 = (n) => `$${Number(n || 0).toFixed(2)}`;
   const pct = (n) => `${Number(n || 0).toFixed(1)}%`;
@@ -233,6 +234,43 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
       `).join("")}
     </ul>` : `<p class="muted">No services returned from Render.</p>`;
 
+  // ---------- Hosting — Twilio (Phase 3.3 chunk 3) ----------------------
+  const tw = twilio || { monthly_total_usd: 0, usage_by_category: [], phone_numbers: { count: 0, monthly_cost: 0 }, balance_usd: 0, configured: false, notes: "" };
+  const twTopCats = (tw.usage_by_category || []).slice(0, 5);
+  const twList = twTopCats.length ? `
+    <ul class="cost-service-list">
+      ${twTopCats.map((c) => `
+        <li>
+          <span><b>${escape(c.description)}</b> <span class="svc-meta">· ${escape(c.category)}</span></span>
+          <span class="svc-cost">${dollar2(c.price_usd)}</span>
+        </li>
+      `).join("")}
+    </ul>` : (tw.configured
+      ? `<p class="muted">No billable usage this month yet.</p>`
+      : `<p class="muted">Not configured — set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN on the API service.</p>`);
+  const twTotalDisplay = tw.configured
+    ? dollar2(tw.monthly_total_usd)
+    : `<span class="muted">—</span>`;
+  const twilioSection = `
+    <h2 class="empire-heading">📞 Hosting — Twilio</h2>
+    <div class="cost-grid two">
+      <div class="cost-card">
+        <h4>Month-to-date spend</h4>
+        <div class="cost-stat gold">${twTotalDisplay}</div>
+        <div class="muted small">
+          ${tw.configured
+            ? `${tw.phone_numbers.count} number(s) · ${dollar2(tw.phone_numbers.monthly_cost)} rental · balance ${dollar2(tw.balance_usd)} · 1h cache`
+            : "Not configured"}
+        </div>
+      </div>
+      <div class="cost-card">
+        <h4>Top categories this month</h4>
+        ${twList}
+        <p class="muted small" style="margin-top:8px;">${escape(tw.notes || "")}</p>
+      </div>
+    </div>
+  `;
+
   // ---------- Hosting — Cloudflare (Phase 3.3 chunk 2) ------------------
   const cf = cloudflare || { monthly_total_usd: 0, subscriptions: [], configured: false, notes: "", gaps: [] };
   const cfTopSubs = (cf.subscriptions || []).slice(0, 5);
@@ -288,6 +326,8 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
         <p class="muted small" style="margin-top:8px;">${escape(cf.notes || "")}</p>
       </div>
     </div>
+
+    ${twilioSection}
   `;
 
   const empireSection = `
