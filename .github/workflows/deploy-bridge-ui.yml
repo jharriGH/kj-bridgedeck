@@ -1,0 +1,56 @@
+name: Deploy bridge-ui to Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bridge-ui/**'
+      - '.github/workflows/deploy-bridge-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Publish to Pages
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify dist directory exists
+        run: |
+          if [ ! -d bridge-ui/dist ]; then
+            echo "::error::bridge-ui/dist not found — the UI must be pre-built and committed (or add a build step here)"
+            exit 1
+          fi
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy bridge-ui/dist --project-name=kj-bridgedeck-ui --branch=main --commit-dirty=true
+
+      - name: Purge Cloudflare edge cache (best-effort)
+        continue-on-error: true
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+        run: |
+          if [ -z "$CF_ZONE_ID" ]; then
+            echo "::notice::CLOUDFLARE_ZONE_ID secret not set — skipping cache purge"
+            exit 0
+          fi
+          response=$(curl -sS -X POST \
+            "https://api.cloudflare.com/client/v4/zones/$CF_ZONE_ID/purge_cache" \
+            -H "Authorization: Bearer $CF_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data '{"purge_everything":true}')
+          echo "$response"
+          if echo "$response" | grep -q '"success":true'; then
+            echo "::notice::Cache purged for zone $CF_ZONE_ID"
+          else
+            echo "::warning::Cache purge failed — token likely lacks 'Cache Purge:Edit' on the zone"
+          fi
