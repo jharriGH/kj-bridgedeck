@@ -1,7 +1,8 @@
 // Cost tab — full empire cost dashboard.
 // Pulls /cost/summary, /cost/timeline, /cost/by-source, /cost/by-intent,
 // /cost/rate-limit, /cost/wasted-cost, /cost/refund-worthy, /cost/caps,
-// /sessions/health, /cost/hosting and renders one HUD-styled grid.
+// /sessions/health, /cost/hosting, /hosting/cloudflare/spend
+// and renders one HUD-styled grid.
 import * as api from "./api.js";
 import { toast } from "./toast.js";
 
@@ -15,7 +16,7 @@ async function load() {
   body.innerHTML = `<div class="placeholder"><p>Loading cost dashboard…</p></div>`;
 
   try {
-    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting] = await Promise.all([
+    const [summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting, cloudflare] = await Promise.all([
       api.get("/cost/summary"),
       api.get("/cost/timeline", { days: 30 }),
       api.get("/cost/by-source", { days: 7 }),
@@ -31,11 +32,12 @@ async function load() {
       api.get("/cost/external", { days: 30 }).catch(() => ({ rows: [] })),
       api.get("/cost/coverage").catch(() => ({ coverage: [], unexpected_sources: [] })),
       api.get("/cost/hosting").catch(() => ({ total_monthly_estimated_usd: 0, service_count: 0, services: [], notes: "Hosting endpoint unavailable." })),
+      api.get("/hosting/cloudflare/spend").catch(() => ({ monthly_total_usd: 0, subscriptions: [], configured: false, notes: "Cloudflare endpoint unavailable.", gaps: [] })),
     ]);
 
     body.innerHTML = render({
       summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live,
-      empire, recon, external, coverage, hosting,
+      empire, recon, external, coverage, hosting, cloudflare,
     });
     bindCapEditors(caps);
 
@@ -47,7 +49,7 @@ async function load() {
   }
 }
 
-function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting }) {
+function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, caps, health, live, empire, recon, external, coverage, hosting, cloudflare }) {
   const dollar = (n) => `$${Number(n || 0).toFixed(4)}`;
   const dollar2 = (n) => `$${Number(n || 0).toFixed(2)}`;
   const pct = (n) => `${Number(n || 0).toFixed(1)}%`;
@@ -230,6 +232,28 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
         </li>
       `).join("")}
     </ul>` : `<p class="muted">No services returned from Render.</p>`;
+
+  // ---------- Hosting — Cloudflare (Phase 3.3 chunk 2) ------------------
+  const cf = cloudflare || { monthly_total_usd: 0, subscriptions: [], configured: false, notes: "", gaps: [] };
+  const cfTopSubs = (cf.subscriptions || []).slice(0, 5);
+  const cfList = cfTopSubs.length ? `
+    <ul class="cost-service-list">
+      ${cfTopSubs.map((s) => `
+        <li>
+          <span><b>${escape(s.name)}</b> <span class="svc-meta">· ${escape(s.plan)}</span></span>
+          <span class="svc-cost">${dollar2(s.cost_usd)}</span>
+        </li>
+      `).join("")}
+    </ul>` : (cf.configured
+      ? `<p class="muted">No paid subscriptions visible.</p>`
+      : `<p class="muted">Not configured — set CF_API_TOKEN and CF_ACCOUNT_ID on the API service.</p>`);
+  const cfGaps = (cf.gaps || []).length
+    ? `<div class="muted small" style="color:var(--warn);">⚠ Token can't read: ${cf.gaps.map(escape).join(", ")}</div>`
+    : "";
+  const cfTotalDisplay = cf.configured
+    ? `${dollar2(cf.monthly_total_usd)}${(cf.gaps || []).length ? '<span class="muted small"> (best-effort)</span>' : ""}`
+    : `<span class="muted">—</span>`;
+
   const hostingSection = `
     <h2 class="empire-heading">🛰️ Hosting — Render</h2>
     <div class="cost-grid two">
@@ -245,6 +269,23 @@ function render({ summary, timeline, bySource, byIntent, rate, wasted, refund, c
         <h4>Top services by cost</h4>
         ${hostingList}
         <p class="muted small" style="margin-top:8px;">${escape(h.notes || "")}</p>
+      </div>
+    </div>
+
+    <h2 class="empire-heading">☁️ Hosting — Cloudflare</h2>
+    <div class="cost-grid two">
+      <div class="cost-card">
+        <h4>Estimated monthly spend</h4>
+        <div class="cost-stat gold">${cfTotalDisplay}</div>
+        <div class="muted small">
+          ${cf.configured ? `${(cf.subscriptions || []).length} subscription line(s) · 1h cache` : "Not configured"}
+        </div>
+        ${cfGaps}
+      </div>
+      <div class="cost-card">
+        <h4>Top subscriptions</h4>
+        ${cfList}
+        <p class="muted small" style="margin-top:8px;">${escape(cf.notes || "")}</p>
       </div>
     </div>
   `;
