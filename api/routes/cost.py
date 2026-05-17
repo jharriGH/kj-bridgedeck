@@ -37,12 +37,14 @@ RECONCILIATION_VIEW = "spend_reconciliation_7d"
 # (the auxiliary BridgeDeck pipeline calls) are filtered out of the
 # coverage report so they don't pollute the "which KJE product is
 # instrumented" picture.
+# EXPECTED_PRODUCTS_CCDISPATCH_V1: cc_dispatch is the empire-wide
+# dispatched-Claude-Code system (instrumented by cc_dispatch_server.py).
 EXPECTED_PRODUCTS = [
     "kjwidgetz", "kjle", "demoboosterz", "demoenginez", "siteenginez",
     "unhidelocal", "voicedropz", "kj_autonomous", "agentenginez",
     "daycaremarketerz", "reviewbombz", "kjpde", "kj_salesagentz",
     "kj_testenginez", "kj_bridgedeck", "iamstillhere", "telehealth",
-    "financeiq", "inkhaus", "offerenginez",
+    "financeiq", "inkhaus", "offerenginez", "cc_dispatch",
 ]
 INTERNAL_SOURCES = {"bridge", "intent", "summarizer", "whisper", "cc_session", "bridge_compress"}
 
