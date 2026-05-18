@@ -77,6 +77,71 @@ def mark_sessions_stale(machine_id: str) -> int:
         return 0
 
 
+# === WATCHER_DURABLE_FIX_V1 (sweep_dead_pid_sessions) ===
+def sweep_dead_pid_sessions(machine_id: str) -> int:
+    """End any non-ended live_sessions for this machine whose PID is dead.
+
+    Called at watcher startup so stale rows from a previous run (e.g. a
+    process that exited while the watcher was interrupted mid-handoff)
+    don't pollute /sessions/live. Returns the count of rows ended.
+
+    Uses ``os.kill(pid, 0)`` to probe liveness — fast, no extra deps.
+    Skips rows missing a PID. Errors are logged and swallowed; never
+    raises out of this function. ``live_sessions`` has no ``ended_at``
+    column (that lives on ``session_archive``); status + last_activity
+    are the only updateable fields here. (WATCHER_DURABLE_FIX_V1)
+    """
+    import os
+    client = get_supabase()
+    if client is None:
+        log.warning("sweep_dead_pid_sessions: no supabase client; skipping")
+        return 0
+    try:
+        resp = (
+            client.schema(_SCHEMA)
+            .table("live_sessions")
+            .select("session_id,pid,status")
+            .eq("machine_id", machine_id)
+            .neq("status", "ended")
+            .execute()
+        )
+        rows = resp.data or []
+    except Exception as e:  # noqa: BLE001
+        log.warning("sweep_dead_pid_sessions: select failed: %s", e)
+        return 0
+
+    ended = 0
+    for r in rows:
+        pid = r.get("pid")
+        sid = r.get("session_id")
+        if not pid or not sid:
+            continue
+        try:
+            os.kill(int(pid), 0)
+            # Signal 0 = liveness probe. No exception => process alive.
+            continue
+        except ProcessLookupError:
+            pass  # dead — fall through to mark ended
+        except PermissionError:
+            # Process alive but owned by another user. Treat as alive.
+            continue
+        except Exception as e:  # noqa: BLE001
+            log.debug("sweep_dead_pid_sessions: probe(%s) error: %s — leaving row alone", pid, e)
+            continue
+        try:
+            now = _now_iso()
+            client.schema(_SCHEMA).table("live_sessions").update({
+                "status": "ended",
+                "last_activity": now,
+            }).eq("session_id", sid).execute()
+            ended += 1
+            log.info("sweep_dead_pid_sessions: ended sid=%s pid=%s", sid, pid)
+        except Exception as e:  # noqa: BLE001
+            log.warning("sweep_dead_pid_sessions: end(%s) failed: %s", sid, e)
+    log.info("sweep_dead_pid_sessions(%s): ended %d stale row(s)", machine_id, ended)
+    return ended
+
+
 # ============================================================================
 # session_archive + session_handoffs
 # ============================================================================

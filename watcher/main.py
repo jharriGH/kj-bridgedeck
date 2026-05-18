@@ -403,6 +403,15 @@ async def run() -> None:
     log.info("Watcher starting — machine_id=%s port=%s", cfg.machine_id, cfg.local_api_port)
     _start_local_api_thread()
 
+    # WATCHER_DURABLE_FIX_V1 — clear any stale "processing" rows from a previous
+    # run whose PID is now dead. Idempotent: only touches rows whose PIDs cannot
+    # be signaled, never racks running sessions.
+    try:
+        n_ended = supabase_client.sweep_dead_pid_sessions(cfg.machine_id)
+        log.info("startup sweep: ended %d stale dead-PID row(s)", n_ended)
+    except Exception as e:  # noqa: BLE001
+        log.warning("startup sweep failed (non-fatal): %s", e)
+
     history_logger.quick(
         event_type="watcher.started",
         event_category="session",
