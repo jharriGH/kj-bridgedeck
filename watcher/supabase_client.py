@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from supabase import Client, create_client
@@ -17,6 +17,13 @@ log = logging.getLogger(__name__)
 
 _SCHEMA = "kjcodedeck"
 _client: Optional[Client] = None
+
+# WATCHER_AGE_SWEEP_V1 — any live_sessions row whose last_activity is older
+# than this threshold is reconciled to status="ended" by sweep_stale_sessions().
+# Cross-machine: works for rows we cannot PID-probe (e.g. jim-windows-main from
+# a Linux VPS). 48h is conservative — a healthy Claude Code session updates
+# last_activity every poll tick (~3s), so anything 2 days silent is a zombie.
+STALE_SESSION_MAX_AGE_HOURS = 48
 
 
 def get_supabase() -> Optional[Client]:
@@ -139,6 +146,68 @@ def sweep_dead_pid_sessions(machine_id: str) -> int:
         except Exception as e:  # noqa: BLE001
             log.warning("sweep_dead_pid_sessions: end(%s) failed: %s", sid, e)
     log.info("sweep_dead_pid_sessions(%s): ended %d stale row(s)", machine_id, ended)
+    return ended
+
+
+# === WATCHER_AGE_SWEEP_V1 (sweep_stale_sessions) ===
+def sweep_stale_sessions() -> int:
+    """End any non-ended live_sessions whose last_activity is older than
+    ``STALE_SESSION_MAX_AGE_HOURS``. Cross-machine, age-only, complementary
+    to ``sweep_dead_pid_sessions`` (which can only probe local PIDs).
+
+    Specifically targets zombie rows from offline / dead watchers on other
+    machines whose PIDs we cannot signal. Returns the count of rows ended.
+
+    Errors all swallowed; never raises. live_sessions has no ``ended_at``
+    column — only ``status`` + ``last_activity`` are updateable here.
+    (WATCHER_AGE_SWEEP_V1)
+    """
+    client = get_supabase()
+    if client is None:
+        log.warning("sweep_stale_sessions: no supabase client; skipping")
+        return 0
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=STALE_SESSION_MAX_AGE_HOURS)
+    cutoff_iso = cutoff.isoformat()
+    try:
+        resp = (
+            client.schema(_SCHEMA)
+            .table("live_sessions")
+            .select("session_id,machine_id,status,last_activity")
+            .neq("status", "ended")
+            .lt("last_activity", cutoff_iso)
+            .execute()
+        )
+        rows = resp.data or []
+    except Exception as e:  # noqa: BLE001
+        log.warning("sweep_stale_sessions: select failed: %s", e)
+        return 0
+
+    if not rows:
+        log.debug("sweep_stale_sessions: nothing older than %s", cutoff_iso)
+        return 0
+
+    ended = 0
+    now = _now_iso()
+    for r in rows:
+        sid = r.get("session_id")
+        if not sid:
+            continue
+        try:
+            client.schema(_SCHEMA).table("live_sessions").update({
+                "status": "ended",
+                "last_activity": now,
+            }).eq("session_id", sid).execute()
+            ended += 1
+            log.info(
+                "sweep_stale_sessions: ended sid=%s machine=%s last_activity=%s",
+                sid, r.get("machine_id"), r.get("last_activity"),
+            )
+        except Exception as e:  # noqa: BLE001
+            log.warning("sweep_stale_sessions: end(%s) failed: %s", sid, e)
+    log.info(
+        "sweep_stale_sessions: ended %d row(s) older than %dh (cutoff=%s)",
+        ended, STALE_SESSION_MAX_AGE_HOURS, cutoff_iso,
+    )
     return ended
 
 
