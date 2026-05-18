@@ -1,6 +1,8 @@
 """Sessions — dashboard reads + session control proxy to watcher."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException
 
 from services import history_logger
@@ -54,6 +56,38 @@ async def session_health() -> dict:
             "healthy":   sum(1 for r in rows if r.get("health_status") == "healthy"),
         },
     }
+
+
+@router.get("/recent")
+async def list_recent_sessions(hours: int = 24, limit: int = 200) -> list[dict]:
+    """Recent-activity feed for the Monitor. Returns ALL sessions (live or
+    ended) whose ``last_activity`` falls within the past ``hours`` window,
+    newest-first, capped at ``limit`` rows.
+
+    Complements ``/sessions/live`` which only surfaces non-ended sessions —
+    that view is empty whenever nothing is currently running. The Monitor
+    uses ``/sessions/recent`` to remain glanceable across quiet moments.
+
+    Bounds: ``hours`` clamped to [1, 168] (one week), ``limit`` to [1, 1000].
+
+    NOTE: this route MUST stay declared before ``/{session_id}`` or the
+    catch-all UUID matcher will swallow the path.
+    """
+    hours = max(1, min(int(hours), 168))
+    limit = max(1, min(int(limit), 1000))
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    def _do():
+        return (
+            table("live_sessions")
+            .select("*")
+            .gte("last_activity", cutoff)
+            .order("last_activity", desc=True)
+            .limit(limit)
+            .execute()
+        )
+    res = await run_sync(_do)
+    return res.data or []
 
 
 @router.get("/{session_id}")
