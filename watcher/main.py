@@ -99,10 +99,36 @@ def _derive_session_id(jsonl_path: Optional[Path], pid: int, cwd: Optional[str])
 # ============================================================================
 
 
+# WATCHER_AGE_SWEEP_V1 — gate the cross-machine age-based sweep so it fires
+# at most every AGE_SWEEP_INTERVAL_SECONDS, not every 3-second poll tick.
+AGE_SWEEP_INTERVAL_SECONDS = 600  # 10 minutes
+_last_age_sweep_at: Optional[datetime] = None
+
+
+def _maybe_age_sweep() -> None:
+    """Run sweep_stale_sessions at most once per AGE_SWEEP_INTERVAL_SECONDS.
+
+    Safe to call every tick — internally rate-limited. Errors swallowed."""
+    global _last_age_sweep_at
+    now = datetime.now(timezone.utc)
+    if _last_age_sweep_at is not None:
+        elapsed = (now - _last_age_sweep_at).total_seconds()
+        if elapsed < AGE_SWEEP_INTERVAL_SECONDS:
+            return
+    _last_age_sweep_at = now
+    try:
+        n = supabase_client.sweep_stale_sessions()
+        if n:
+            log.info("periodic age-sweep: ended %d cross-machine stale row(s)", n)
+    except Exception as e:  # noqa: BLE001
+        log.warning("periodic age-sweep failed (non-fatal): %s", e)
+
+
 async def poll_once() -> None:
     cfg = get_config()
     state = get_state()
     now = datetime.now(timezone.utc)
+    _maybe_age_sweep()
 
     try:
         procs = process_detector.find_claude_code_processes()
@@ -402,6 +428,25 @@ async def run() -> None:
     cfg = reload_settings()
     log.info("Watcher starting — machine_id=%s port=%s", cfg.machine_id, cfg.local_api_port)
     _start_local_api_thread()
+
+    # WATCHER_DURABLE_FIX_V1 — clear any stale "processing" rows from a previous
+    # run whose PID is now dead. Idempotent: only touches rows whose PIDs cannot
+    # be signaled, never racks running sessions.
+    try:
+        n_ended = supabase_client.sweep_dead_pid_sessions(cfg.machine_id)
+        log.info("startup sweep: ended %d stale dead-PID row(s)", n_ended)
+    except Exception as e:  # noqa: BLE001
+        log.warning("startup sweep failed (non-fatal): %s", e)
+
+    # WATCHER_AGE_SWEEP_V1 — cross-machine age-based sweep. Reconciles zombie
+    # rows from offline watchers (e.g. dead jim-windows-main) that this VPS
+    # cannot PID-probe. Boot-time pass; the poll loop runs it again every
+    # 10 min via _maybe_age_sweep().
+    try:
+        n_age = supabase_client.sweep_stale_sessions()
+        log.info("startup age-sweep: ended %d cross-machine stale row(s)", n_age)
+    except Exception as e:  # noqa: BLE001
+        log.warning("startup age-sweep failed (non-fatal): %s", e)
 
     history_logger.quick(
         event_type="watcher.started",
