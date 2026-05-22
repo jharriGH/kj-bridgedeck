@@ -1,6 +1,8 @@
 """Sessions — dashboard reads + session control proxy to watcher."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, HTTPException
 
 from services import history_logger
@@ -54,6 +56,35 @@ async def session_health() -> dict:
             "healthy":   sum(1 for r in rows if r.get("health_status") == "healthy"),
         },
     }
+
+
+# RECENT_VIEW_V1: glanceable "what ran in the last N hours" view for the Monitor.
+# Must be ordered BEFORE the /{session_id} catch-all so "recent" does not get
+# matched as a session id.
+@router.get("/recent")
+async def list_recent_sessions(hours: int = 24, limit: int = 200) -> list[dict]:
+    """Return live_sessions rows whose last_activity is within the trailing
+    ``hours`` window (1..168). Unlike /live, this INCLUDES ended sessions —
+    that is the entire point: it is the "what ran today" feed for the
+    Monitor, not the currently-active list.
+
+    Bound: limit clamped to [1, 1000]; hours clamped to [1, 168] (1 week).
+    """
+    hours = max(1, min(int(hours), 168))
+    limit = max(1, min(int(limit), 1000))
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    def _do():
+        return (
+            table("live_sessions")
+            .select("*")
+            .gte("last_activity", cutoff)
+            .order("last_activity", desc=True)
+            .limit(limit)
+            .execute()
+        )
+    res = await run_sync(_do)
+    return res.data or []
 
 
 @router.get("/{session_id}")
