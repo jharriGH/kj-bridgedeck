@@ -540,3 +540,10 @@ kbd {
 *::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
 *::-webkit-scrollbar-thumb:hover { background: var(--accent); }
 *::-webkit-scrollbar-track { background: transparent; }
+
+/* ITEM_7_V1: Recent Sessions panel (last 24h feed). */
+.recent-toolbar { margin-top: 24px; }
+.recent-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.recent-tile { opacity: 0.92; }
+.recent-tile:hover { opacity: 1; }
+.recent-tile .tile-meta.recent-meta-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
