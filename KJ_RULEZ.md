@@ -335,64 +335,27 @@ FULL BRAIN + MCP + VAULT + DISPATCHER AWARENESS
   brain_memory        â€” semantic memory store
   run_build_task      â€” dispatch CC on VPS
 
-VAULT HAS EVERYTHING â€” never ask Jim for:
+VAULT IS THE CREDENTIAL SOURCE â€” check it first:
   API keys, tokens, passwords, Supabase URLs,
   Stripe keys, Twilio creds, Render API keys,
   Railway tokens, GitHub PAT, RackNerd VPS creds,
   Resend keys, Anthropic keys, Cloudflare tokens,
   Qdrant, n8n, Vapi â€” everything is in vault.
-  Always: brain_vault_search("what you need")
+  Always: brain_vault_search("what you need"). If a key is GENUINELY missing, ask Jim once - never guess or fabricate.
 
 No response is complete without the banner.
 No exception. No excuse.
 
 â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-AUTONOMOUS EXECUTION RULE
-Added: 2026-05-07
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+## OPERATING RULES
+See the canonical SC/CC operating instructions, propagated to every repo by brain_sync.py:
+  C:\Users\Jim\Documents\GitHub\KJE_SC_INSTRUCTIONS_CLEAN.md
 
-EVERY Claude â€” SC or CC â€” operates autonomously.
-Jim is NEVER the middle man. Ever.
-
-WHEN GIVEN A TASK:
-1. brain_get_project() â†’ load full context
-2. brain_vault_search() â†’ get any credential
-3. run_build_task() â†’ dispatch CC on VPS
-4. brain_search() â†’ monitor for completion
-5. Report to Jim ONLY when done or truly blocked
-
-NEVER:
-- Ask Jim for credentials
-- Ask Jim to copy/paste between windows
-- Ask Jim which option to choose
-- Ask Jim to run any command
-- Ask Jim to be the middle man between SC and CC
-- Present options and wait â€” pick one and execute
-
-ALWAYS:
-- Get everything from Brain vault
-- Dispatch CC via run_build_task
-- Log all decisions to Brain
-- Work autonomously until complete
-- Interrupt Jim ONLY for:
-  * Business decisions requiring his judgment
-  * New credentials not in vault
-  * Task complete â€” here are results
-
-VPS DISPATCHER:
-URL: http://192.161.173.97:8091/dispatch
-Key: stored in vault under empire/VPS_DISPATCH_KEY
-Claude Code: /usr/local/bin/claude on VPS
-
-KJE MCP SERVER:
-URL: stored in vault under empire/KJE_MCP_URL
-Tools: brain_status, brain_search,
-       brain_get_project, brain_vault_search,
-       brain_log, brain_memory, run_build_task
-
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+Key points for this repo:
+- run_build_task is METERED (~$2-3) -- get Jim's "go" before firing.
+- git push origin main -- NORMAL only, never --force.
+- Credentials: brain_vault_search first; ask Jim only if genuinely missing.
 
 ---
 
@@ -443,3 +406,9 @@ Tools: brain_status, brain_search,
   2. Wait until merge + deploy completes, then verify against production
 - Cost of violating this rule: the 2026-05-27 scale_trigger incident, ~$30 real spend plus 2,349 polluted Supabase rows. Source: Brain memory rbz-scale-trigger-caller-forensics_bcaeffd4.
 - This rule applies to BOTH human-initiated and CC-dispatched retests.
+
+---
+
+## Technical Standards
+
+- **Booking infrastructure:** All KJ apps integrate scheduling/booking via KJEmpireCalz (https://book.empirecalz.com). Do NOT build booking per-product. See KJ_EMPIRE_BOOKING_INTEGRATION.md.
