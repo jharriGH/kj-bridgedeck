@@ -1,4 +1,4 @@
-# KJ RULEZ — Standing Rules for All KJE Builds
+﻿# KJ RULEZ â€” Standing Rules for All KJE Builds
 
 > Empire-wide standards. Apply to every KJE / DevelopingRiches product build.
 > Repo-specific rules live in each repo's `CLAUDE.md`. The rules below
@@ -36,7 +36,7 @@ The smoke-test step MUST include all of these:
 
    - Top-level keys
    - Whether arrays are wrapped (e.g. `{"projects":[...], "count":N}`) or naked
-   - Field name mappings to local schema (e.g. `brain.id → local.slug`)
+   - Field name mappings to local schema (e.g. `brain.id â†’ local.slug`)
    - Pseudo-projects to filter (e.g. `{"id":"all"}` is a UI placeholder)
 
 4. **WHAT COUNTS AS VERIFYING:**
@@ -50,7 +50,7 @@ The smoke-test step MUST include all of these:
    - "It probably looks like..."
    - Assuming endpoint paths from convention (e.g. `/codedeck/X` when `/X` is
      real)
-   - Reusing endpoints from prior product memory without re-verifying — Brain
+   - Reusing endpoints from prior product memory without re-verifying â€” Brain
      versions evolve
 
 ### Endpoint catalog (verified live 2026-04-27)
@@ -98,7 +98,7 @@ Anthropic Admin API ingestion is the gold standard for reconciliation
 but it's gated behind Build Tier 2+ / Enterprise. Live verification
 2026-04-28 confirmed the regular `sk-ant-api03-...` messages key returns
 HTTP 401 "invalid x-api-key" against `/v1/organizations/usage_report/messages`
-and `/cost_report` — admin-only. Until the empire qualifies for that
+and `/cost_report` â€” admin-only. Until the empire qualifies for that
 tier, self-reporting via BridgeDeck `/cost/ingest` is the baseline
 standard.
 
@@ -119,7 +119,7 @@ Jim never manually updates env vars or secrets on any deployment platform. CC al
 When env var changes are needed, CC MUST:
 
 1. Use the platform's API/CLI to set vars directly:
-   - Render: Render API v1 — POST /v1/services/{service_id}/env-vars
+   - Render: Render API v1 â€” POST /v1/services/{service_id}/env-vars
    - Railway: railway CLI or GraphQL API
    - Cloudflare Pages: wrangler pages secret put
    - Vercel: vercel env add
@@ -129,7 +129,7 @@ When env var changes are needed, CC MUST:
 
 3. Verify the new var landed by curl-checking the deployed service health endpoint or env reflection (where available).
 
-4. Report exactly what was set, where, and the deployment status — no placeholder text like "you should add X to Y."
+4. Report exactly what was set, where, and the deployment status â€” no placeholder text like "you should add X to Y."
 
 ### Required environment for CC
 
@@ -138,13 +138,13 @@ For automation to work, these must be in CC's environment (per service it manage
 - RAILWAY_TOKEN (project-scoped per Railway project)
 - CF_API_TOKEN (Cloudflare account-scoped)
 
-If any of these is missing when CC needs to update env vars, CC must STOP and ask Jim to add the credential ONCE — never ask Jim to manually add env vars to a platform.
+If any of these is missing when CC needs to update env vars, CC must STOP and ask Jim to add the credential ONCE â€” never ask Jim to manually add env vars to a platform.
 
 ### Exceptions
 
 The only acceptable manual env var asks are:
 
-1. First-time API key generation when the credential doesn't yet exist anywhere (e.g. "generate a new Anthropic key, paste it back to me — then I'll handle distributing it to all services").
+1. First-time API key generation when the credential doesn't yet exist anywhere (e.g. "generate a new Anthropic key, paste it back to me â€” then I'll handle distributing it to all services").
 
 2. Browser OAuth flows that physically require Jim to click Allow on a consent screen (e.g. first-time gh auth login).
 
@@ -156,13 +156,13 @@ Jim has arthritis and brain fog. Manual dashboard clicking across 5+ services to
 
 ---
 
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 MANDATORY BRAIN SESSION START RULE
 Added: 2026-05-05
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-EVERY Claude session — claude.ai, Claude Code,
-or desktop app — MUST start with Brain context.
+EVERY Claude session â€” claude.ai, Claude Code,
+or desktop app â€” MUST start with Brain context.
 No exceptions. No excuses.
 
 WHAT IS BRAIN?
@@ -189,9 +189,9 @@ unhidelocal, siteenginez, reviewbombz,
 iasy, kj_codedeck, agentenginez
 
 FOR CLAUDE.AI SESSIONS:
-Open Brain UI → select project in filter bar
-→ click Copy Session Starter (top right)
-→ paste as FIRST message in new chat
+Open Brain UI â†’ select project in filter bar
+â†’ click Copy Session Starter (top right)
+â†’ paste as FIRST message in new chat
 
 FOR QUICK SESSIONS (no Brain UI available):
 Paste this as first message:
@@ -243,78 +243,78 @@ Log gotchas while context is fresh.
 NEW PROJECT RULE:
 Every new KJE project must be registered in
 Brain before building starts:
-1. Brain UI → Manage Projects → Add New
+1. Brain UI â†’ Manage Projects â†’ Add New
 2. Fill: name, emoji, status, description,
    repo_path
 3. python brain_sync.py [project_id]
 4. Start building with brain_session_start()
 
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 BRAIN LOGGING OWNERSHIP RULE
 Added: 2026-05-05
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 BRAIN LOGGING IS NOT OPTIONAL AND NOT JIM'S JOB.
 Claude logs to Brain. Not Jim. Ever.
 
 If you are asking Jim which option to use for
-logging — you are doing it wrong. Pick one and execute.
+logging â€” you are doing it wrong. Pick one and execute.
 
 RULES FOR EVERY CLAUDE SESSION:
 1. YOU decide how to log. Never ask Jim.
 2. YOU write the curl commands. Never ask Jim.
 3. YOU execute the logging. Never ask Jim.
 4. YOU choose /log or /memory based on these rules:
-   - Decision/lesson/bug fix → POST /memory (semantic)
-   - Progress/event/automated → POST /log (fast)
+   - Decision/lesson/bug fix â†’ POST /memory (semantic)
+   - Progress/event/automated â†’ POST /log (fast)
 5. YOU update next_action on the project.
 6. YOU save the build card at session end.
 
 WHEN ASKED "WHAT OPTION?" OR "HOW SHOULD I LOG?":
 Wrong question. There is no option. Just log it.
-Use Option B always — write the script, run it,
+Use Option B always â€” write the script, run it,
 confirm it worked, report back to Jim with results.
 
-CLOSING RITUAL — MANDATORY EVERY SESSION:
-Step 1: POST /memory — full session summary
-Step 2: PATCH /projects — update next_action
-Step 3: POST /cards — save full build state
+CLOSING RITUAL â€” MANDATORY EVERY SESSION:
+Step 1: POST /memory â€” full session summary
+Step 2: PATCH /projects â€” update next_action
+Step 3: POST /cards â€” save full build state
 No exceptions. No asking. Just execute.
 
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 STATUS BANNER + CHAT SIZE + EMPIRE AWARENESS RULE
 Added: 2026-05-10
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 EVERY response from EVERY Claude (SC or CC) MUST
-end with this banner — no exceptions.
+end with this banner â€” no exceptions.
 
-┌─────────────────────────────────────────────┐
-│ 📊 PROJECT: [name] — [X]% complete         │
-│ 📍 PHASE:   [current phase] — [X]% complete │
-│ 💬 CHAT:    ~[X]% full                     │
-└─────────────────────────────────────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ ðŸ“Š PROJECT: [name] â€” [X]% complete         â”‚
+â”‚ ðŸ“ PHASE:   [current phase] â€” [X]% complete â”‚
+â”‚ ðŸ’¬ CHAT:    ~[X]% full                     â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
 For SC sessions, also include the active sessions
 table populated from brain_search("active session"):
 
-┌──────────────┬───────────────────────┬──────────────┐
-│ Session      │ Status                │ Jim Needed?  │
-├──────────────┼───────────────────────┼──────────────┤
-│ [project] SC │ [what it's doing]     │ [Yes/No]     │
-│ [project] CC │ [building X]          │ None—auto    │
-│ This chat    │ Strategic coordinator │ Reading this │
-└──────────────┴───────────────────────┴──────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚ Session      â”‚ Status                â”‚ Jim Needed?  â”‚
+â”œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¤
+â”‚ [project] SC â”‚ [what it's doing]     â”‚ [Yes/No]     â”‚
+â”‚ [project] CC â”‚ [building X]          â”‚ Noneâ€”auto    â”‚
+â”‚ This chat    â”‚ Strategic coordinator â”‚ Reading this â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 
 CHAT SIZE ESTIMATION:
-- Rough formula: message_count × 1500 / 200000 × 100
-- Warn at 70%: "💬 Chat getting full — consider new chat"
-- Hard suggest at 85%: "⚠️ Open new chat now to avoid losing context"
-- Critical at 95%: "🚨 OPEN NEW CHAT IMMEDIATELY"
+- Rough formula: message_count Ã— 1500 / 200000 Ã— 100
+- Warn at 70%: "ðŸ’¬ Chat getting full â€” consider new chat"
+- Hard suggest at 85%: "âš ï¸ Open new chat now to avoid losing context"
+- Critical at 95%: "ðŸš¨ OPEN NEW CHAT IMMEDIATELY"
 
 FULL BRAIN + MCP + VAULT + DISPATCHER AWARENESS
 (every Claude must know without being told):
@@ -327,72 +327,35 @@ FULL BRAIN + MCP + VAULT + DISPATCHER AWARENESS
   NOTIFY:     POST /notify  body {severity, message, channel, project}
 
 7 BRAIN TOOLS (use without being asked):
-  brain_status        — empire health check
-  brain_search        — search all memories
-  brain_get_project   — full project context
-  brain_vault_search  — ANY credential from vault
-  brain_log           — fast event log
-  brain_memory        — semantic memory store
-  run_build_task      — dispatch CC on VPS
+  brain_status        â€” empire health check
+  brain_search        â€” search all memories
+  brain_get_project   â€” full project context
+  brain_vault_search  â€” ANY credential from vault
+  brain_log           â€” fast event log
+  brain_memory        â€” semantic memory store
+  run_build_task      â€” dispatch CC on VPS
 
-VAULT HAS EVERYTHING — never ask Jim for:
+VAULT IS THE CREDENTIAL SOURCE â€” check it first:
   API keys, tokens, passwords, Supabase URLs,
   Stripe keys, Twilio creds, Render API keys,
   Railway tokens, GitHub PAT, RackNerd VPS creds,
   Resend keys, Anthropic keys, Cloudflare tokens,
-  Qdrant, n8n, Vapi — everything is in vault.
-  Always: brain_vault_search("what you need")
+  Qdrant, n8n, Vapi â€” everything is in vault.
+  Always: brain_vault_search("what you need"). If a key is GENUINELY missing, ask Jim once - never guess or fabricate.
 
 No response is complete without the banner.
 No exception. No excuse.
 
-═══════════════════════════════════════════════
+â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-═══════════════════════════════════════════════
-AUTONOMOUS EXECUTION RULE
-Added: 2026-05-07
-═══════════════════════════════════════════════
+## OPERATING RULES
+See the canonical SC/CC operating instructions, propagated to every repo by brain_sync.py:
+  C:\Users\Jim\Documents\GitHub\KJE_SC_INSTRUCTIONS_CLEAN.md
 
-EVERY Claude — SC or CC — operates autonomously.
-Jim is NEVER the middle man. Ever.
-
-WHEN GIVEN A TASK:
-1. brain_get_project() → load full context
-2. brain_vault_search() → get any credential
-3. run_build_task() → dispatch CC on VPS
-4. brain_search() → monitor for completion
-5. Report to Jim ONLY when done or truly blocked
-
-NEVER:
-- Ask Jim for credentials
-- Ask Jim to copy/paste between windows
-- Ask Jim which option to choose
-- Ask Jim to run any command
-- Ask Jim to be the middle man between SC and CC
-- Present options and wait — pick one and execute
-
-ALWAYS:
-- Get everything from Brain vault
-- Dispatch CC via run_build_task
-- Log all decisions to Brain
-- Work autonomously until complete
-- Interrupt Jim ONLY for:
-  * Business decisions requiring his judgment
-  * New credentials not in vault
-  * Task complete — here are results
-
-VPS DISPATCHER:
-URL: http://192.161.173.97:8091/dispatch
-Key: stored in vault under empire/VPS_DISPATCH_KEY
-Claude Code: /usr/local/bin/claude on VPS
-
-KJE MCP SERVER:
-URL: stored in vault under empire/KJE_MCP_URL
-Tools: brain_status, brain_search,
-       brain_get_project, brain_vault_search,
-       brain_log, brain_memory, run_build_task
-
-═══════════════════════════════════════════════
+Key points for this repo:
+- run_build_task is METERED (~$2-3) -- get Jim's "go" before firing.
+- git push origin main -- NORMAL only, never --force.
+- Credentials: brain_vault_search first; ask Jim only if genuinely missing.
 
 ---
 
@@ -404,19 +367,19 @@ Tools: brain_status, brain_search,
   was `/projects` with `x-brain-key` header. Both were guessable from
   convention but neither was verified against live Brain.
 - **2026-04-29**: Empire Cost Logging rule introduced. Anthropic Admin
-  API ingestion (Phase 3.1) blocked behind Build Tier 2+ — pivoted to
+  API ingestion (Phase 3.1) blocked behind Build Tier 2+ â€” pivoted to
   empire-wide self-reporting via `kje-cost-logger` module + BridgeDeck
   `/cost/ingest` endpoint.
 - **2026-04-29**: Env Var Automation rule introduced. Jim never updates
-  platform env vars manually — CC handles all secret distribution via
+  platform env vars manually â€” CC handles all secret distribution via
   Render/Railway/Cloudflare/Vercel/GitHub APIs. Required tokens
   (RENDER_API_KEY, RAILWAY_TOKEN, CF_API_TOKEN) gated through CC's
   environment; CC asks once if missing, never repeatedly.
 - **2026-05-05**: Brain Logging Ownership rule introduced. Brain logging
-  is Claude's job — not Jim's. CC must pick /log vs /memory itself,
+  is Claude's job â€” not Jim's. CC must pick /log vs /memory itself,
   write and execute the curl, then run the closing ritual (POST /memory,
   PATCH /projects, POST /cards) at session end. No more asking Jim
-  "which option?" — there is no option, just log it.
+  "which option?" â€” there is no option, just log it.
 - **2026-05-07**: Autonomous Execution rule introduced. SC and CC work
   together via run_build_task on the VPS dispatcher; Jim is never the
   middle man between them. All credentials come from the Brain vault.
@@ -431,3 +394,21 @@ Tools: brain_status, brain_search,
   so every Claude knows them without being told. AUTONOMOUS_EXECUTION_BLOCK
   in brain_sync.py updated in lockstep so all repos pick up the rule
   on next sync.
+
+---
+
+## Code Deployment Discipline
+
+### Code Deployment Discipline
+- **Never retest a write-gate against unmerged code on production.** If a PR introduces a gate (auth check, kill switch, suppression flag, etc.), do NOT POST to the gated production endpoint from a CC session until the PR is merged. The gate does not exist in production yet, so the request runs against pre-gate code and can fire the very destructive operation the gate was meant to prevent.
+- Two approved retest paths:
+  1. Test against a Railway preview environment built from the PR branch
+  2. Wait until merge + deploy completes, then verify against production
+- Cost of violating this rule: the 2026-05-27 scale_trigger incident, ~$30 real spend plus 2,349 polluted Supabase rows. Source: Brain memory rbz-scale-trigger-caller-forensics_bcaeffd4.
+- This rule applies to BOTH human-initiated and CC-dispatched retests.
+
+---
+
+## Technical Standards
+
+- **Booking infrastructure:** All KJ apps integrate scheduling/booking via KJEmpireCalz (https://book.empirecalz.com). Do NOT build booking per-product. See KJ_EMPIRE_BOOKING_INTEGRATION.md.
