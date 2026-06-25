@@ -431,3 +431,9 @@ Tools: brain_status, brain_search,
   so every Claude knows them without being told. AUTONOMOUS_EXECUTION_BLOCK
   in brain_sync.py updated in lockstep so all repos pick up the rule
   on next sync.
+
+---
+
+## Technical Standards
+
+- **Booking infrastructure:** All KJ apps integrate scheduling/booking via KJEmpireCalz (https://book.empirecalz.com). Do NOT build booking per-product. See KJ_EMPIRE_BOOKING_INTEGRATION.md.
