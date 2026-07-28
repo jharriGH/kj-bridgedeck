@@ -1,7 +1,7 @@
-# ⚡ KJ_BRIDGEDECK — CLAUDE.md
+# None KJ BridgeDeck — CLAUDE.md
 # Managed by brain_sync.py (Brain sections)
 # + Manual additions (never auto-updated)
-# Last synced: June 29, 2026 11:57 AM PST
+# Last synced: July 27, 2026 09:57 PM PST
 
 ---
 
@@ -200,12 +200,18 @@ Manual run: python brain_sync.py  (location: C:\Users\Jim\Documents\GitHub\)
   the file. One writer, no conflicts, always current.
 
 # ───────────────────────────────────────────────────────────
-# MANDATORY FOOTER — after every response
+# MANDATORY FOOTER — end EVERY response with this block
 # ───────────────────────────────────────────────────────────
-📊 [PROJECT] — [X]% complete | 📍 [PHASE] — [X]%
-🔄 EMPIRE IN FLIGHT
-| Session | Status | Jim Needed? |
-(populate from brain_search("active session") or known active sessions)
+📁 [PROJECT] · [TAG] · [DIR]
+🎯 Task: [TASK]
+📍 Now: [what you are doing this response]
+🕐 Started [STARTED]
+
+To fill PROJECT/TAG/DIR/STARTED: read the context file the cc launcher wrote at kickoff:
+  PowerShell: Get-Content "$env:TEMP\cc_context_<TAG>.txt"
+where <TAG> is your session tag (e.g. TEST-9). Lines: TAG=, TASK=, PROJECT=, DIR=, STARTED=.
+Use TASK for the Task line. Fill Now with your current action.
+If the file is not found, fall back to working directory + repo name; note "context file not found" once.
 
 # ───────────────────────────────────────────────────────────
 # TEMPLATE — UNIVERSAL SESSION ENDER (paste to a CC to close out)
@@ -221,8 +227,11 @@ Then give a plain-English summary of what we accomplished.
 
 ## CURRENT STATUS
 <!-- BRAIN-SYNC:START:STATUS -->
-*Brain sync: June 29, 2026 11:57 AM PST*
+*Brain sync: July 27, 2026 09:57 PM PST*
 
+**Status:** IN_PROGRESS
+**Description:** None
+**Next Action:** ⚡ Registered in Brain. NEXT: set real next_action + write first BUILD_STATE card and session summary.
 <!-- BRAIN-SYNC:END:STATUS -->
 
 ---
@@ -235,17 +244,17 @@ Then give a plain-English summary of what we accomplished.
 - Last decision: None
 
 **AI Costs:**
-- Today: $0.0049
-- This month: $0.0049
-- All time: $0.0049
+- Today: $0.0093
+- This month: $0.0093
+- All time: $0.0093
 
 **Empire:**
-- 2 live | 2 launch ready | 10 in progress
+- 4 live | 2 launch ready | 23 in progress
 <!-- BRAIN-SYNC:END:EMPIRE_STATE -->
 
 ---
 
-## RECENT KJ_BRIDGEDECK MEMORIES
+## RECENT KJ BRIDGEDECK MEMORIES
 <!-- BRAIN-SYNC:START:MEMORIES -->
 1. kj-bridgedeck confirmed as the canonical KJ_RULEZ.md source
 2. kj-bridgedeck should be RESET not pushed due to being a duplicate block, already onboarded on origin
@@ -366,6 +375,18 @@ See `docs/POST_DEPLOY.md`. Summary:
 ## MANUAL ADDITIONS
 <!-- brain_sync.py never modifies below this line -->
 
+---
+
+## EMPIRE STATE & COSTS
+
+---
+
+## RECENT KJ_BRIDGEDECK MEMORIES
+
+---
+
+## BUILD STATE
+
 
 ---
 
@@ -393,7 +414,7 @@ brain_session_end(
   next_action="[most important next task]"
 )
 brain_save_card(
-  title="KJ_BRIDGEDECK BUILD_STATE [date]",
+  title="KJ BridgeDeck BUILD_STATE [date]",
   project="kj_bridgedeck",
   content="[full build state md]"
 )
@@ -401,5 +422,5 @@ brain_save_card(
 
 ---
 
-*Synced: June 29, 2026 11:57 AM PST*
+*Synced: July 27, 2026 09:57 PM PST*
 *Refresh: `python brain_sync.py kj_bridgedeck`*
