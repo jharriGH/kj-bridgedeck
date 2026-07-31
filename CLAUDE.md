@@ -1,7 +1,7 @@
 # None KJ BridgeDeck — CLAUDE.md
 # Managed by brain_sync.py (Brain sections)
 # + Manual additions (never auto-updated)
-# Last synced: July 28, 2026 08:26 PM PST
+# Last synced: July 31, 2026 01:32 PM PST
 
 ---
 
@@ -179,6 +179,33 @@ WRITE-CONFIRMATION (read-back required, ALL critical writes — not just handoff
   once. If still failing: "⚠️ WRITE STILL FAILING — likely brain MCP connection, flag to
   Jim." Never mask a failed write as success.
 
+## RESERVED COMMANDS — Jim's shorthand for handoffs. Execute these SILENTLY.
+When Jim's message matches a pattern below, it IS a command — do not explain, do not reach for other tools, just execute via the handoff-card mechanism above and reply per the SILENCE RULES.
+
+1. "email <X> about <Y>" / "send an email to <X> about <Y>" / "ask <X> about <Y>" / "email <X>: <Y>"
+   -> Resolve <X> to a canonical slug via GET /resolve-slug?input=<X> (Brain API).
+      - exact/alias/shorthand hit: SILENTLY write a HANDOFF card to the canonical slug (FROM this SC, TO canonical, <Y> as REQUEST; if Jim said "ask what he needs" compose the specific questions). Auto-PRIORITY high if Jim said ASAP/urgent/"before <event>". READ BACK by id/title to confirm it landed.
+        REPLY TO JIM = exactly one line: "Sent to <X>."  (NO card id, NO echo of questions, NO summary, NO explanation of mechanism.)
+      - method "ambiguous": ONE line: "<X> = <candidate1> or <candidate2>?"  then wait.
+      - method "fuzzy-suggest": ONE line: "Did you mean <suggestion>?"
+      - method "unknown" or write failed: ONE line: "Couldn't send - <reason>."
+
+2. "check your email" / "any handoffs?" / "check your inbox" / "any mail?"
+   -> SILENTLY read cards for THIS SC's canonical slug (+ aliases) where title starts "HANDOFF ->" or "REPORT ->" and STATUS open. Read FULL body BY ID (list view truncates).
+      none -> "No new mail."  some -> one line each: "From <sender> about <subject> (<priority>)."  Do NOT dump bodies unless Jim says "read it"/"show me".
+
+3. "reply to it" / "answer it" / "send it back" / "respond"
+   -> SILENTLY verify the answer against live code/schema, UPSERT THE SAME card (same title) with reply appended + STATUS answered, READ BACK to confirm.
+      REPLY TO JIM = one line: "Replied to <sender>."  (NO echo of the answer.)
+
+4. "check <X>'s reply" / "did <X> answer" / "what did <X> say"
+   -> Resolve <X>, silently read the answered card by id/title (full body).
+      REPLY TO JIM = ONLY the answer content Jim needs, concise. NO "I queried Brain", NO play-by-play, NO card ids. Just the substance. Full detail only if Jim says "full reply".
+
+SILENCE RULES (all four): NEVER show card ids/endpoints/"I wrote/queried Brain"/embedding-lag notes/step-by-step. NEVER echo questions when sending or summarize the reply when sending back. SUCCESS = one line. Speak more ONLY if (a) FAILED, (b) AMBIGUOUS needing a pick, (c) Jim explicitly asks. Write-confirmation happens SILENTLY - surface only failure. Management by exception: only interrupt Jim to decide or report failure.
+
+"email" is a RESERVED VERB. If Jim says "email <someone>", it is ALWAYS this command - never interpret it as needing brain_notify (that's Jim-alerts only) or as a literal question about messaging tools.
+
 # ───────────────────────────────────────────────────────────
 # SESSION START — load context automatically (free, read-only)
 # ───────────────────────────────────────────────────────────
@@ -313,7 +340,7 @@ verified landed" ONLY if every read-back above passed.
 
 ## CURRENT STATUS
 <!-- BRAIN-SYNC:START:STATUS -->
-*Brain sync: July 28, 2026 08:26 PM PST*
+*Brain sync: July 31, 2026 01:32 PM PST*
 
 **Status:** IN_PROGRESS
 **Description:** None
@@ -336,7 +363,7 @@ verified landed" ONLY if every read-back above passed.
 - All time: $0.0048
 
 **Empire:**
-- 4 live | 2 launch ready | 22 in progress
+- 4 live | 2 launch ready | 29 in progress
 <!-- BRAIN-SYNC:END:EMPIRE_STATE -->
 
 ---
@@ -357,104 +384,9 @@ verified landed" ONLY if every read-back above passed.
 
 ## BUILD STATE
 <!-- BRAIN-SYNC:START:BUILD_STATE -->
-**Card:** KJ_BRIDGEDECK BUILD_STATE 2026-06-22
-**Saved:** 2026-06-23
-
-# KJ BridgeDeck — Build State
-
-## Version: 1.0.0-rc1 (code complete, awaiting cloud deploy)
-
-## Parallel build status
-
-- [x] **Bridge-A** (Foundation): Schema, contracts, repo bootstrap — 2026-04-23
-- [x] **Bridge-B** (Watcher): Python watcher on Windows — 2026-04-23 (.exe built 2026-04-26)
-- [x] **Bridge-C** (API): FastAPI service on Render — 2026-04-23
-- [x] **Bridge-D** (Bridge Core): Chat, voice, action executor — 2026-04-23
-- [x] **Bridge-E** (UI): Standalone HTML + Cloudflare Pages — 2026-04-26
-- [x] **Path A integration pass** — bridge.py wired, ActionExecutor in
-  lifespan, schema shim, .env scaffolded, watcher .exe built, Piper
-  installed, UI authored — 2026-04-26
-
-## Build artifacts (local)
-
-- `watcher/dist/kj-bridgedeck-watcher.exe` — 47.6 MB ✓
-- `bin/piper/piper/piper.exe` — 510 KB ✓
-- `bin/piper/voices/en_US-ryan-high.onnx` ✓
-- `bridge-ui/dist/` — static UI (index.html + 8 JS modules + 1 CSS) ✓
-- `.env` — 4 placeholders awaiting paste
-
-## Foundation deliverables (Bridge-A, complete)
-
-- [x] `supabase/schema.sql` — 11 tables, indexes, RLS, ~60 seed settings rows
-- [x] `shared/contracts.py` — Pydantic models for every cross-agent shape
-- [x] `shared/contracts.ts` — TypeScript mirrors
-- [x] `render.yaml` — API deployment config
-- [x] `install/brain_flush.ps1` — memory queue flush for Task Scheduler
-- [x] `install/install_watcher.ps1` — needs admin to register Scheduled Task
-- [x] `install/install_piper.ps1` — ran clean (PS 5.1) on 2026-04-26
-- [x] `docs/ADMIN_SETTINGS.md`
-- [x] `docs/HISTORY_LOG.md`
-- [x] `docs/DEPLOYMENT.md`
-- [x] `docs/POST_DEPLOY.md` — manual steps remaining (NEW)
-- [x] `docs/HANDOFFS/`
-- [x] `BRIDGEDECK_SPEC.md`
-- [x] `CLAUDE.md`
-- [x] `.env.example`
-- [x] `.gitignore` (with `bridge-ui/dist/` carve-out)
-
-## Live-system status (real, as of 2026-04-26)
-
-| Component | URL | Status |
-|---|---|---|
-| Brain | https://jim-brain-production.up.railway.app | ✅ HTTP 200 (v1.3.2) |
-| Render API | https://kj-bridgedeck-api.onrender.com | ❌ HTTP 404 — service not yet created |
-| Supabase | https://dhzpwobfihrprlcxqjbq.supabase.co | 🟡 401 (reachable; needs schema deploy + key) |
-| Cloudflare Pages UI | https://kj-bridgedeck-ui.pages.dev | ⏳ not yet deployed |
-| Watcher local API | http://localhost:7171 | ⏳ exe built; needs admin to register Scheduled Task |
-
-## Manual steps remaining
-
-See `docs/POST_DEPLOY.md`. Summary:
-
-1. Fill 4 `__JIM_PASTE__` values in `.env`.
-2. Deploy `supabase/schema.sql` in Supabase SQL Editor.
-3. Create Render Blueprint from `render.yaml` + paste the same secrets in
-   the dashboard.
-4. Cloudflare Pages: `npm run deploy` from `bridge-ui/` (or git auto-deploy).
-5. Update Supabase `voice.piper_*` settings (deferred SQL in POST_DEPLOY.md).
-6. Admin PowerShell: `.\install\install_watcher.ps1` to register the
-   watcher Scheduled Task.
-7. Schedule `brain_flush.ps1` (no admin needed).
-8. Run the 6 end-to-end smoke scenarios from `docs/DEPLOYMENT.md` §9.
-
-## Known drift / footnotes
-
-- **Brain v1.3.2 vs v1.4.0.** `CLAUDE.md` and `shared/contracts.py` annotate
-  v1.4.0; live Brain reports v1.3.2. Test the handoff schema early.
-- **Render cold start.** Starter plan idles after 15min — first hit is ~20s.
-- **Voice TTS.** Render can't run Piper (no binary in container). The UI
-  falls back to Web Speech API automatically when Piper returns 503.
-
-## Integration verification checklist (post-cloud-deploy)
-
-- [ ] `GET /health` returns supabase=ok, brain=ok
-- [ ] Watcher writes to `kjcodedeck.live_sessions` every 3 sec
-- [ ] API reads live sessions and proxies session control to localhost:7171
-- [ ] Bridge `/chat` SSE stream returns intent/sources/deltas/done events
-- [ ] Voice `/transcribe` round-trips a recorded blob through Whisper
-- [ ] Voice `/synthesize` returns WAV from Piper (or 503 → Web Speech fallback)
-- [ ] Session end → Haiku summary → Brain handoff → row in `session_handoffs`
-- [ ] Low-confidence handoff (<0.85) appears in Brain review queue
-- [ ] Action queue: `launch_session` directive from Bridge → watcher spawns terminal
-
-## Known constraints (unchanged)
-
-- **Windows-first.** WSL2 Ubuntu available; installer targets Windows native.
-- **Brain v1.x is source of truth** for memory, context, and review queue.
-- **No `watchdog`** — poll Claude Code process list every 3 sec.
-- **Dual-path Claude Code.** Watcher reads both
-  `C:\Users\Jim\.claude` and `\\wsl$\Ubuntu\home\jim\.claude`.
-
+*No build card in Brain yet.*
+*brain_sync will auto-push BUILD_STATE.md if found in repo.*
+*Or call brain_save_card() at end of next CC session.*
 <!-- BRAIN-SYNC:END:BUILD_STATE -->
 
 ---
@@ -509,5 +441,5 @@ brain_save_card(
 
 ---
 
-*Synced: July 28, 2026 08:26 PM PST*
+*Synced: July 31, 2026 01:32 PM PST*
 *Refresh: `python brain_sync.py kj_bridgedeck`*
