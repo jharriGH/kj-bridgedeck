@@ -309,10 +309,28 @@ async def _handle_session_end(session_id: str) -> None:
     )
 
     # 3) Insert handoff row
+    # Bug 2: a degraded summarizer run (missing key, API error, unparseable
+    # output) must announce FAILURE, not read like a real "session partial"
+    # report. Force the FIRST line to say so explicitly, and page Jim —
+    # confidence 0.0 already routes this to the review queue downstream, but
+    # the text itself must never look like a genuine handoff.
+    summarizer_degraded = summary.get("summarizer_model") == "fallback"
+    degraded_reason = summary.get("reason", "unknown")
+    if summarizer_degraded:
+        report_summary = (
+            f"REPORT MISSING: summarizer unavailable ({degraded_reason})\n"
+            f"Session {session_id} on {project_slug} ended with status "
+            f"'{handoff_status}' but could NOT be summarized by AI — this "
+            f"is NOT a real session report. Raw JSONL was archived to "
+            f"Supabase; review it manually."
+        )
+    else:
+        report_summary = summary.get("summary") or ""
+
     handoff_row = {
         "session_id": session_id,
         "project_slug": project_slug,
-        "summary": summary.get("summary") or "",
+        "summary": report_summary,
         "decisions": summary.get("decisions") or [],
         "artifacts": summary.get("artifacts") or [],
         "next_action": summary.get("next_action"),
@@ -323,6 +341,16 @@ async def _handle_session_end(session_id: str) -> None:
         "brain_sync": "pending",
     }
     handoff_id = supabase_client.insert_handoff(handoff_row)
+
+    if summarizer_degraded:
+        await brain_client.BrainClient().notify(
+            message=(
+                f"[codedeck_watcher] summarizer unavailable ({degraded_reason}) — "
+                f"session {session_id} on {project_slug} has NO real report, "
+                f"review queue only."
+            ),
+            severity="warn",
+        )
 
     # 4) POST to Brain
     brain_response_dict: Optional[dict] = None

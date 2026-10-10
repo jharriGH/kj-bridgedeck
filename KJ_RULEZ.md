@@ -436,10 +436,13 @@ Tools: brain_status, brain_search,
 
 ## Code Deployment Discipline
 
-### Code Deployment Discipline
 - **Never retest a write-gate against unmerged code on production.** If a PR introduces a gate (auth check, kill switch, suppression flag, etc.), do NOT POST to the gated production endpoint from a CC session until the PR is merged. The gate does not exist in production yet, so the request runs against pre-gate code and can fire the very destructive operation the gate was meant to prevent.
 - Two approved retest paths:
   1. Test against a Railway preview environment built from the PR branch
   2. Wait until merge + deploy completes, then verify against production
 - Cost of violating this rule: the 2026-05-27 scale_trigger incident, ~$30 real spend plus 2,349 polluted Supabase rows. Source: Brain memory rbz-scale-trigger-caller-forensics_bcaeffd4.
 - This rule applies to BOTH human-initiated and CC-dispatched retests.
+
+## Technical Standards
+
+- **Booking infrastructure:** All KJ apps integrate scheduling/booking via KJEmpireCalz (https://book.empirecalz.com). Do NOT build booking per-product. See KJ_EMPIRE_BOOKING_INTEGRATION.md.

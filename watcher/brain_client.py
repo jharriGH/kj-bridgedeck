@@ -73,3 +73,22 @@ class BrainClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def notify(
+        self, message: str, severity: str = "warn", channel: str = "both"
+    ) -> dict[str, Any]:
+        """POST /notify — best-effort. A failed notify must never raise past
+        the caller; the degraded-run path that fires this still needs the
+        session-end flow to finish (archive, blob mirror, cleanup)."""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.url}/notify",
+                    headers=self._headers,
+                    json={"severity": severity, "message": message[:500], "channel": channel},
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError as e:
+            log.warning("brain_notify failed: %s", e)
+            return {"ok": False, "error": str(e)}

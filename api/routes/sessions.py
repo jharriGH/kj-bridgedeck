@@ -58,6 +58,8 @@ async def session_health() -> dict:
     }
 
 
+# Must be ordered BEFORE the /{session_id} catch-all so "recent" does not get
+# matched as a session id.
 @router.get("/recent")
 async def list_recent_sessions(hours: int = 24, limit: int = 200) -> list[dict]:
     """Recent-activity feed for the Monitor. Returns ALL sessions (live or
@@ -66,7 +68,8 @@ async def list_recent_sessions(hours: int = 24, limit: int = 200) -> list[dict]:
 
     Complements ``/sessions/live`` which only surfaces non-ended sessions —
     that view is empty whenever nothing is currently running. The Monitor
-    uses ``/sessions/recent`` to remain glanceable across quiet moments.
+    uses ``/sessions/recent`` to remain glanceable across quiet moments,
+    including quiet ones where nothing is currently running.
 
     Bounds: ``hours`` clamped to [1, 168] (one week), ``limit`` to [1, 1000].
 

@@ -77,7 +77,11 @@ class ContextGatherer:
         project_slug: str | None,
         message: str,
         time_range_days: int | None = None,
+        force_full_context: bool = False,  # FIX_A_V1
     ) -> BridgeSources:
+        # FIX_A_V1: stash the flag on self so _gather_general can read it
+        # without bloating every other handler's signature.
+        self._force_full_context = bool(force_full_context)
         sources = BridgeSources()
         handler_name = self._HANDLERS.get(intent, "_gather_general")
         handler = getattr(self, handler_name)
@@ -228,9 +232,53 @@ class ContextGatherer:
         message: str,
         time_range_days: int | None,
     ) -> None:
-        ctx = await self._cached_get(client, "/context")
-        if ctx is not None:
-            sources.projects = [ctx]
+        # FIX_A_V1: spec says NEVER pull /context unless force_full_context=true.
+        # Old behavior dumped the whole-empire /context blob into
+        # sources.projects[0] (observed ~49,633 input tokens/turn). Mirror the
+        # _gather_empire_summary guardrail instead: slim /projects shape +
+        # scoped /cards + /memory/search. /context only on the explicit escape
+        # hatch.
+        if getattr(self, "_force_full_context", False):
+            ctx = await self._cached_get(client, "/context")
+            if ctx is not None:
+                sources.projects = [ctx]
+            return
+
+        # Slim /projects — same shape _gather_empire_summary uses.
+        projects = await self._cached_get(client, "/projects")
+        if isinstance(projects, dict):
+            projects = projects.get("projects") or []
+        if isinstance(projects, list):
+            sources.projects = [
+                {
+                    "slug": p.get("id"),
+                    "label": p.get("label"),
+                    "status": p.get("status"),
+                    "next_action": p.get("next_action"),
+                    "group": p.get("group"),
+                }
+                for p in projects
+                if p.get("id") and p.get("id") != "all"
+            ]
+
+        # Top-3 recent cards (client-side filter mirrors _recent_cards' shape).
+        cards_resp = await self._cached_get(client, "/cards", ttl_seconds=120)
+        cards = cards_resp.get("cards") if isinstance(cards_resp, dict) else (cards_resp or [])
+        if isinstance(cards, list):
+            sources.cards = [
+                {
+                    "id": c.get("id"),
+                    "title": c.get("title"),
+                    "project": c.get("project"),
+                    "content_excerpt": (c.get("content") or "")[:600],
+                    "saved_at": c.get("saved_at"),
+                }
+                for c in cards[:3]
+            ]
+
+        # Optional semantic recall scoped to the user message (top 3).
+        if (message or "").strip():
+            sources.memories = await self._memory_search(client, message, top_k=3)
 
     # Mapping intent string → handler method name. Defined after class body.
     _HANDLERS: dict[str, str] = {}

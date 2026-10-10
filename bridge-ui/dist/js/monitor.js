@@ -1,10 +1,13 @@
-// Monitor tab: live grid of sessions, polled every 3s.
+// Monitor tab: live grid of sessions, polled every 3s.  (ITEM_7_V1: + Recent panel)
 import * as api from "./api.js";
 import { toast } from "./toast.js";
 
 const POLL_MS = 3000;
+const RECENT_POLL_MS = 30000;  // ITEM_7_V1: 30s — historical, no need to hammer
+const RECENT_HOURS = 24;       // ITEM_7_V1: trailing window
 
 let pollTimer = null;
+let recentPollTimer = null;  // ITEM_7_V1
 let projectsCache = [];
 
 const fmtDuration = (ms) => {
@@ -93,19 +96,73 @@ async function refresh() {
   }
 }
 
+// ITEM_7_V1: Recent Sessions panel — fetched from /sessions/recent.
+// Lower cadence than /live; renders the same tile shape but compact.
+function renderRecentRow(s) {
+  const meta = projectMeta(s.project_slug);
+  const lastMs = s.last_activity ? Date.now() - new Date(s.last_activity).getTime() : null;
+  const lastTxt = lastMs != null ? fmtDuration(lastMs) + ' ago' : '—';
+  const cost = (s.cost_usd || 0).toFixed(4);
+  return `
+    <div class="tile recent-tile" data-session="${s.session_id}">
+      <div class="tile-head">
+        <div class="tile-title">
+          <span class="tile-emoji">${meta.emoji}</span>
+          <span>${escape(meta.display)}</span>
+        </div>
+        <span class="status-chip" data-status="${s.status}">${s.status}</span>
+      </div>
+      <div class="tile-meta recent-meta-row">
+        <span><span class="muted">machine</span> <b>${escape(s.machine_id || '?')}</b></span>
+        <span><span class="muted">last</span> <b>${lastTxt}</b></span>
+        <span><span class="muted">$</span> <b>${cost}</b></span>
+      </div>
+    </div>
+  `;
+}
+
+async function refreshRecent() {
+  const grid = document.getElementById('recent-grid');
+  const meta = document.getElementById('recent-meta');
+  if (!grid || !meta) return;
+  try {
+    const rows = await api.get('/sessions/recent', { hours: RECENT_HOURS });
+    const list = Array.isArray(rows) ? rows : (rows.sessions || []);
+    if (!list.length) {
+      grid.innerHTML = `<div class="placeholder"><p class="muted">No sessions in the last ${RECENT_HOURS}h.</p></div>`;
+    } else {
+      grid.innerHTML = list.map(renderRecentRow).join('');
+    }
+    meta.textContent = `${list.length} row${list.length === 1 ? '' : 's'} · ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    grid.innerHTML = `<div class="placeholder"><p>Failed to load recent: ${escape(e.message)}</p></div>`;
+    meta.textContent = 'error';
+  }
+}
+
 function startPolling() {
   stopPolling();
   refresh();
   pollTimer = setInterval(refresh, POLL_MS);
+  // ITEM_7_V1: kick the recent panel + lower-cadence tick alongside the live grid.
+  refreshRecent();
+  recentPollTimer = setInterval(refreshRecent, RECENT_POLL_MS);
 }
 
 function stopPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = null;
+  // ITEM_7_V1: cancel the recent tick too when leaving the Monitor tab.
+  if (recentPollTimer) clearInterval(recentPollTimer);
+  recentPollTimer = null;
 }
 
 export function init() {
-  document.getElementById("refresh-monitor").addEventListener("click", refresh);
+  // ITEM_7_V1: refresh button kicks BOTH the live grid and the recent panel.
+  document.getElementById("refresh-monitor").addEventListener("click", () => {
+    refresh();
+    refreshRecent();
+  });
 
   document.getElementById("session-grid").addEventListener("click", (e) => {
     const tile = e.target.closest(".tile[data-session]");
@@ -113,6 +170,17 @@ export function init() {
     const sessionId = tile.dataset.session;
     document.dispatchEvent(new CustomEvent("bridgedeck:open-terminal", { detail: { sessionId } }));
   });
+
+  // ITEM_7_V1: same click→terminal handler for the recent grid.
+  const recentGrid = document.getElementById("recent-grid");
+  if (recentGrid) {
+    recentGrid.addEventListener("click", (e) => {
+      const tile = e.target.closest(".tile[data-session]");
+      if (!tile) return;
+      const sessionId = tile.dataset.session;
+      document.dispatchEvent(new CustomEvent("bridgedeck:open-terminal", { detail: { sessionId } }));
+    });
+  }
 
   document.getElementById("launch-session-btn").addEventListener("click", async () => {
     if (!projectsCache.length) await loadProjects();
@@ -146,4 +214,5 @@ export function init() {
   loadProjects().then(startPolling);
 }
 
-export const monitor = { refresh, loadProjects };
+// ITEM_7_V1: also expose refreshRecent on the monitor surface.
+export const monitor = { refresh, refreshRecent, loadProjects };

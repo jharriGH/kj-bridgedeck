@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -17,9 +18,31 @@ from dotenv import load_dotenv
 
 log = logging.getLogger(__name__)
 
-# Load .env from repo root (two levels up from this file: watcher/config.py -> repo/)
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+
+def _resolve_repo_root() -> Path:
+    """Locate the repo root that holds the gitignored .env (ANTHROPIC_API_KEY
+    etc). In dev, __file__ is two levels under repo/ (watcher/config.py) and
+    this is exact.
+
+    When frozen by PyInstaller (watcher.spec), __file__ resolves inside the
+    temp extraction dir instead of the real repo tree, AND .env is never
+    bundled (by design — it's gitignored, secrets stay local). That combo
+    made load_dotenv() silently find nothing, so ANTHROPIC_API_KEY came up
+    unset for the installed .exe even though the repo's real .env has it —
+    this was the "summarizer unavailable: missing API key" bug. Resolve
+    relative to the .exe's own location instead: dist/<exe> -> watcher/ ->
+    repo root.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent.parent.parent
+    return Path(__file__).resolve().parent.parent
+
+
+_REPO_ROOT = _resolve_repo_root()
 load_dotenv(_REPO_ROOT / ".env")
+if getattr(sys, "frozen", False) and not (_REPO_ROOT / ".env").exists():
+    # Defensive fallback: a .env copied next to the .exe itself also works.
+    load_dotenv(Path(sys.executable).resolve().parent / ".env")
 
 
 @dataclass

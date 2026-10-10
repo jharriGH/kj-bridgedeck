@@ -202,12 +202,15 @@ class BridgeChatService:
         )
 
         # 4. Gather context
+        # FIX_A_V1: plumb force_full_context so ContextGatherer can honor
+        # the spec rule that /context is only fetched on explicit opt-in.
         try:
             sources = await self.context_gatherer.gather(
                 intent=intent_data["intent"],
                 project_slug=intent_data.get("project_slug"),
                 message=request.message,
                 time_range_days=intent_data.get("time_range_days"),
+                force_full_context=bool(getattr(request, "force_full_context", False)),
             )
         except Exception as exc:
             logger.exception("context gather failed: %s", exc)
