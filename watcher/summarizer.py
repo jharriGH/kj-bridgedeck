@@ -202,6 +202,9 @@ def _fallback_summary(session: dict, reason: str, raw: str = "") -> dict:
         "confidence": 0.0,
         "warnings": [f"fallback_summary: {reason}"],
         "summarizer_model": "fallback",
+        # Plain reason string so callers (main.py's degraded-run handling)
+        # don't have to re-parse it back out of the "warnings" list.
+        "reason": reason,
         "raw_model_output": raw,
         "prompt_version": cfg.summarizer_prompt_version,
     }
