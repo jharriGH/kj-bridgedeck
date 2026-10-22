@@ -49,12 +49,35 @@ def _now_iso() -> str:
 
 
 def upsert_live_session(session: dict[str, Any]) -> bool:
+    """Upsert a live_sessions row.
+
+    WRITE_STORM_FIX_V1 — a session already recorded as "ended" must never be
+    upserted again. Pre-fix, every poll tick re-wrote every known session
+    (including rows ended days ago), which blinds the shared Logs Explorer
+    for all 18 schemas (~475k writes/day for ~7 actually-live rows). The
+    guard below checks the DB's own status before writing an "ended" row —
+    not in-memory state — so it holds even across process restarts/zombies.
+    Live/changed sessions still upsert every tick as before.
+    """
     client = get_supabase()
     if client is None:
         return False
     try:
         payload = dict(session)
         payload.setdefault("last_activity", _now_iso())
+        session_id = payload.get("session_id")
+        if payload.get("status") == "ended" and session_id:
+            existing = (
+                client.schema(_SCHEMA)
+                .table("live_sessions")
+                .select("status")
+                .eq("session_id", session_id)
+                .limit(1)
+                .execute()
+            )
+            rows = existing.data or []
+            if rows and rows[0].get("status") == "ended":
+                return True  # already written as ended — skip the no-op write
         client.schema(_SCHEMA).table("live_sessions").upsert(
             payload, on_conflict="session_id"
         ).execute()

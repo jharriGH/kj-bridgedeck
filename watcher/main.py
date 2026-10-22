@@ -47,6 +47,7 @@ from watcher import (  # noqa: E402
     history_logger,
     jsonl_parser,
     process_detector,
+    singleton_lock,
     status_resolver,
     summarizer,
     supabase_client,
@@ -350,6 +351,7 @@ async def _handle_session_end(session_id: str) -> None:
                 f"review queue only."
             ),
             severity="warn",
+            dedup_key="summarizer_degraded",
         )
 
     # 4) POST to Brain
@@ -452,7 +454,13 @@ def _start_local_api_thread() -> threading.Thread:
 # ============================================================================
 
 
+_lock_path: Optional[Path] = None
+
+
 async def run() -> None:
+    global _lock_path
+    _lock_path = singleton_lock.acquire_or_exit()
+
     cfg = reload_settings()
     log.info("Watcher starting — machine_id=%s port=%s", cfg.machine_id, cfg.local_api_port)
     _start_local_api_thread()
@@ -532,6 +540,8 @@ async def _shutdown() -> None:
         outcome="success",
         details={"machine_id": cfg.machine_id},
     )
+    if _lock_path is not None:
+        singleton_lock.release(_lock_path)
 
 
 def _configure_logging() -> None:
