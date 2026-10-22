@@ -73,6 +73,29 @@ class BrainClient:
             assert last_err is not None
             raise last_err
 
+    async def log(
+        self, project_slug: str, content: str, tags: list[str] | None = None
+    ) -> dict[str, Any]:
+        """POST /log — fast, audit-only, not searchable. Best-effort: a
+        failed log write must never raise past the caller."""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.url}/log",
+                    headers=self._headers,
+                    json={
+                        "project_slug": project_slug,
+                        "content": content,
+                        "tags": tags or [],
+                        "agent": "codedeck_watcher",
+                    },
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPError as e:
+            log.warning("brain_log failed: %s", e)
+            return {"ok": False, "error": str(e)}
+
     async def fetch_context(self, project_slug: str, depth: str = "standard") -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             resp = await client.get(

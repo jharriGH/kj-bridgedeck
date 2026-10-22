@@ -73,6 +73,13 @@ class WatcherConfig:
     idle_minutes: int = 10
 
     # Summarizer
+    # SUMMARIZER_COST_KILL_V1 — the summarizer was calling Sonnet on every
+    # session's full transcript (~27/hr x ~45k tokens = ~$70-85/day) for
+    # summaries Jim doesn't use. Default OFF; live_sessions tracking is
+    # unaffected either way.
+    summarizer_enabled: bool = os.environ.get("SUMMARIZER_ENABLED", "false").strip().lower() in (
+        "1", "true", "yes",
+    )
     summarizer_default_model: str = "claude-haiku-4-5-20251001"
     summarizer_escalation_model: str = "claude-sonnet-4-5"
     summarizer_escalation_threshold: int = 50_000

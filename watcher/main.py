@@ -269,13 +269,36 @@ async def _handle_session_end(session_id: str) -> None:
         _tracker.last_status.pop(session_id, None)
         return
 
+    project_slug = snapshot.get("project_slug", "unknown")
+
+    if not get_config().summarizer_enabled:
+        # SUMMARIZER_COST_KILL_V1 — no AI, no transcript read, no Anthropic
+        # request while the flag is off. Just the $0 parts: flip the live
+        # row to ended and write one plain audit line.
+        snapshot["status"] = "ended"
+        supabase_client.upsert_live_session(snapshot)
+        state.remove(session_id)
+        await brain_client.BrainClient().log(
+            project_slug=project_slug,
+            content=(
+                f"[codedeck_watcher] {project_slug} session ended: "
+                f"{session_id} (summarizer disabled)"
+            ),
+            tags=["codedeck_handoff", "session_ended", "summarizer_disabled"],
+        )
+        _tracker.last_status.pop(session_id, None)
+        _tracker.started_at.pop(session_id, None)
+        _tracker.last_jsonl_path.pop(session_id, None)
+        _tracker.last_activity.pop(session_id, None)
+        _tracker.pid_for_session.pop(session_id, None)
+        return
+
     status = snapshot.get("status") or "ended"
     jsonl_path = _tracker.last_jsonl_path.get(session_id)
     started = _tracker.started_at.get(session_id) or datetime.now(timezone.utc)
     ended = datetime.now(timezone.utc)
     duration_minutes = max(0.0, (ended - started).total_seconds() / 60.0)
 
-    project_slug = snapshot.get("project_slug", "unknown")
     tokens_in = int(snapshot.get("tokens_in") or 0)
     tokens_out = int(snapshot.get("tokens_out") or 0)
     total_tokens = tokens_in + tokens_out
